@@ -39,17 +39,20 @@ def select_random_speaker(speakers_dir_clean):
     return selected_dir, wav_files
 
 
-def save_data_h5py(rev_signals, scene, speaker_out_dir=[]):
+def save_data_h5py(rev_signals, scene, scene_idx, src_pos_index, speaker_out_dir=[]):
     """
     :param rev_signals: reverberent signals
     :param scene: scene parameters
     :param speaker_out_dir: directory where the dataset is stored (defults is home dir)
     """
-    with h5py.File("reverbDataset.h5", 'a') as h5f:
-        group_name = f"room_{scene['room_dim']}_rt60_{scene['RT60']}_pos_{scene['src_pos']}"
+    os.makedirs(speaker_out_dir, exist_ok=True)
+    dataset_path = os.path.join(speaker_out_dir, "RevMovingSrcDataset.h5")
+
+    with h5py.File(dataset_path, 'a') as h5f:
+        group_name = f"sceneIndx_{scene_idx}_roomDim_{scene['room_dim']}_rt60_{scene['RT60']}_srcPosInd_{src_pos_index}"
         grp = h5f.create_group(group_name)
         grp.create_dataset(f'signals_', data=rev_signals)
-        grp.create_dataset(f'speaker_position_', data=scene['src_pos'])
+        grp.create_dataset(f'speaker_DOA_', data=scene['DOA_az'][src_pos_index])
 
 
 def save_wavs(rev_signals, file, speaker_out_dir, fs):
@@ -97,35 +100,42 @@ def generate_rev_speech(args, scene_type, clean_speech_dir, save_rev_speech_dir,
     for scene_idx in range(num_scenes):
         
         selected_speaker, wav_files = select_random_speaker(clean_speech_dir)
-        
+
         # Generate a scene
         scene = generate_scenes(1, scene_type, len(wav_files))[0]
         mics_num = len(scene['mic_pos'])
+        
+        # plot a cool html plot
         plot_scene_interactive(scene, 'Plots', scene_idx)
         
-        for index, wav_file in enumerate(wav_files):
+        # for index, wav_file in enumerate(wav_files):
+        for index, _ in enumerate(scene['src_pos'][0]):
+            curr_src_pos = scene['src_pos'][:, index]
+            curr_wav_file_path = random.choice(wav_files)
+
             if len(wav_files) < len(scene['src_pos'][0]):
                 raise Exception("speaker wav files are lower then requested speaker location- not enough files!") 
-                
-            print('Processing Scene %d/%d. Speaker: %s, file %d/%d.' % (
-                scene_idx + 1, num_scenes, selected_speaker, index + 1, len(wav_files)))
+
+            print('Processing Scene %d/%d. Speaker: %s, wav file processed: %s, wav file number: %d.' % (
+                scene_idx + 1, num_scenes, selected_speaker, os.path.basename(curr_wav_file_path), index + 1))
 
             # Read a clean file
-            s, fs = sf.read(wav_file)            
+            s, fs = sf.read(curr_wav_file_path)            
 
-            # Generate RIRs for the current source position
-            RIRs, _ = generate_rirs(scene['room_dim'], scene['src_pos'], scene['mic_pos'], scene['RT60'], fs)
+            # Generate RIR for the current source position for all mic posiitons
+            # this can be done for all together- but lfilter cannot so i keep this inside src_pos loop
+            RIRs = generate_rirs(scene['room_dim'], curr_src_pos, scene['mic_pos'], scene['RT60'], fs)
 
-            # Generate reverberant speech
+            # Generate reverberant speech for each mic
             rev_signals = np.zeros([mics_num, len(s)])
-            for j, rir in enumerate(RIRs[0][0]):
+            for j, rir in enumerate(RIRs[0]):
                 rev_signals[j] = lfilter(rir, 1, s)
                 
             # Normalize
             rev_signals = rev_signals / np.max(np.abs(rev_signals)) / 1.1  
 
             # BIUREV-N -- Add noise
-            if args.dataset == 'BIUREV-N':
+            if args.dataset == 'add_noise':
                 # furthest_mic = np.argmax(scene['dists'])
                 furthest_mic = 1 # not calaulated
                 var_furthest = np.var(rev_signals[1])
@@ -137,14 +147,15 @@ def generate_rev_speech(args, scene_type, clean_speech_dir, save_rev_speech_dir,
                 rev_signals = rev_signals / np.max(np.abs(rev_signals)) / 1.1  # Normalize
 
                 # Create a directory in which wav will be saved for examine
-                speaker_out_dir = save_rev_speech_dir / 'BIUREV-N' / args.split / scene_type / selected_speaker/ f'scene_{scene_idx + 1}'
+                speaker_out_dir = save_rev_speech_dir / args.split / f'scene_{scene_idx + 1}' / selected_speaker / f'src_pos{index + 1}' 
                 speaker_out_dir.mkdir(parents=True, exist_ok=True)
 
             # Save wavs
-            save_wavs(rev_signals, 0, speaker_out_dir, fs)               # Save signals to disk
+            save_wavs(rev_signals, 0, speaker_out_dir, fs) # Save wav signals to disk
 
             # Save signals to h5py file
-            save_data_h5py(rev_signals, scene)
+            dataset_sav_folder = 'Results'
+            save_data_h5py(rev_signals, scene, scene_idx, index, dataset_sav_folder)
                         
         scene_agg.append(scene)
         
@@ -158,7 +169,7 @@ if __name__ == '__main__':
         description="Simulates and adds reverberation to a dry sound sample."
     )
     parser.add_argument("--split", choices=['train', 'val', 'test'], default='train', help="Generate training, val or test")
-    parser.add_argument("--dataset", choices=['BIUREV', 'BIUREV-N', 'both'], default='BIUREV-N', help="Generate BIUREV/BIUREV-N/both")
+    parser.add_argument("--dataset", choices=['BIUREV', 'add_noise', 'both'], default='add_noise', help="Generate BIUREV/BIUREV-N/both")
     args = parser.parse_args()
 
     #################################### Generate training data ####################################
