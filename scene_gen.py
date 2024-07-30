@@ -82,7 +82,7 @@ def calculate_doa(src_pos, mic_pos):
     return azimuth_angles, elevation
 
 
-def generate_scenes(scenes_num, scene_type, files_num):
+def generate_scenes(args, scene_type, files_num):
     """
     Generates random rooms with random source and microphones positions
     :param scenes_num: How many scenes (=rooms with source-microphones setups) to generate.
@@ -245,6 +245,8 @@ def plot_scene_interactive(scene, save_path, index):
     :param save_path: saving path for the figure generated
     :param index: outside loop index to support multiple plots in folder
     """
+    os.makedirs(save_path, exist_ok=True)
+
     room_dim = scene['room_dim']
     src_pos = scene['src_pos']
     mic_pos = scene['mic_pos']
