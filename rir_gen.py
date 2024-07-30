@@ -19,9 +19,13 @@ def generate_rirs(room_sz, pos_src, pos_rcv, T60, fs):
     Tdiff = 0.1  # ISM stops here and the Gaussian noise with an exponential envelope starts
     nb_img = gpuRIR.t2n(T60, room_sz)  # Number of image sources in each dimension
 
-    all_RIRs = []
-    for src_pos in pos_src.T:
-        RIR = gpuRIR.simulateRIR(room_sz, beta, src_pos, pos_rcv, nb_img, Tmax, fs, Tdiff=Tdiff, mic_pattern=mic_pattern)
-        all_RIRs.append(RIR)
+    pos_src = pos_src.reshape(-1, 3)  # Reshape to (N, 3)
     
-    return all_RIRs, RIR
+    # pos_rcv_tst = np.array([[1, 1, 1], [1, 1, 1.5], [1, 1.5, 1], [2, 1.5, 1], [2.5, 1.5, 1]]) 
+    # pos_rcv_tst = np.array([[1, 1, 1], [1, 1, 1.5], [1, 1.5, 1]]) 
+    # pos_src_tst = np.array([[1,2.9,0.5],[1,2,0.5]]) # Positions of the 2 sources ([m]
+
+    RIRs = gpuRIR.simulateRIR(room_sz, beta, pos_src, pos_rcv, nb_img, Tmax, fs, Tdiff=Tdiff, mic_pattern=mic_pattern)
+    
+    return RIRs
+
