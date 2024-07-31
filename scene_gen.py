@@ -155,7 +155,7 @@ def generate_scenes(args, scene_type, files_num):
         mic_array_center = np.mean(mics_pos_agg, axis=0) # array center
 
         # Draw a source position
-        src_angle = np.radians(np.arange(30, 165, DOA_grid_lag)+np.degrees(rotation_angle))
+        src_angle = np.radians(np.arange(0, 180, DOA_grid_lag)+np.degrees(rotation_angle))
         src_radius = np.random.uniform(source_min_radius, source_max_radius, size=len(src_angle))
 
         src_angle_deg = np.degrees(src_angle)
