@@ -94,7 +94,7 @@ def generate_scenes(args, scene_type, files_num):
     mics_num = 5            # default: 5
     mic_min_spacing = 0.03  # minimum spacing between microphones in the array (default: 0.03)
     mic_max_spacing = 0.08  # maximum spacing between microphones in the array (default: 0.08)
-    mic_height = 0.5        # Array height from floor (default: 0.5)
+    mic_height = 1.7        # Array height from floor (default: 0.5)
 
     # Room's size
     room_len_x_min = 4
