@@ -1,5 +1,3 @@
-
-import numpy as np
 import gpuRIR
 
 def generate_rirs(room_sz, pos_src, pos_rcv, T60, fs):
