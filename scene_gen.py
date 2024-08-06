@@ -1,17 +1,10 @@
-"""
-Original author:            yochai_yemini
-Updated and modified by:    Maya Veisman (MayaVB)
-
-Docker images will be uploaded to Dockerhub
-"""
-import plotly.graph_objects as go
-import numpy as np
 import os
-import matplotlib.pyplot as plt
-from rir_gen import generate_rirs
+import sys
+import random
 
-from mpl_toolkits.mplot3d import Axes3D
-from math import degrees
+import numpy as np
+import plotly.graph_objects as go
+import matplotlib.pyplot as plt
 
 
 def critical_distance(V, T60):
@@ -25,23 +18,6 @@ def critical_distance(V, T60):
         critical_distance: explained in the description
     """
     return 0.057*np.sqrt(V/T60)
-
-
-def mic_source_dist_range(room_size, T60, scene_type):
-    if scene_type == 'near':
-        min_dist = 0.2
-        max_dist = critical_distance(np.prod(room_size), T60)
-    elif (scene_type == 'far') or (scene_type == 'winning_ticket'):
-        min_dist = 2*critical_distance(np.prod(room_size), T60)
-        max_dist = 3
-        if (min_dist >= max_dist):      # make sure that min_dist <= max_dist
-            min_dist = 1.5*critical_distance(np.prod(room_size), T60)
-    elif scene_type == 'random':
-        min_dist = 0.2
-        max_dist = 3
-    else:
-        raise ValueError("scene_type must be one of {'near', 'far', 'random', 'winning_ticket'}")
-    return min_dist, max_dist
 
 
 def calculate_doa(src_pos, mic_pos):
@@ -82,41 +58,38 @@ def calculate_doa(src_pos, mic_pos):
     return azimuth_angles, elevation
 
 
-def generate_scenes(args, scene_type, files_num):
+def generate_scenes(args):
     """
     Generates random rooms with random source and microphones positions
-    :param scenes_num: How many scenes (=rooms with source-microphones setups) to generate.
-    :param scene_type: 'near', 'far', 'winning_ticket' or 'random'.
+    :param args: from parser
     :return: A dictionary with the room size and source and microphone positions.
     """
     
     # Array size
-    mics_num = 5            # default: 5
-    mic_min_spacing = 0.03  # minimum spacing between microphones in the array (default: 0.03)
-    mic_max_spacing = 0.08  # maximum spacing between microphones in the array (default: 0.08)
-    mic_height = 1.7        # Array height from floor (default: 0.5)
+    mics_num = args.mics_num
+    mic_min_spacing = args.mic_min_spacing
+    mic_max_spacing = args.mic_max_spacing
+    mic_height = args.mic_height
 
     # Room's size
-    room_len_x_min = 4
-    room_len_x_max = 7
-    aspect_ratio_min = 1
-    aspect_ratio_max = 1.5
-    room_len_z_min = 2.3
-    room_len_z_max = 2.9
+    room_len_x_min = args.room_len_x_min
+    room_len_x_max = args.room_len_x_max
+    aspect_ratio_min = args.aspect_ratio_min
+    aspect_ratio_max = args.aspect_ratio_max
+    room_len_z_min = args.room_len_z_min
+    room_len_z_max = args.room_len_z_max
 
     # Room's T60 value
-    T60_options = [0.2, 0.4, 0.6, 0.8]	    # Time for the RIR to reach 60dB of attenuation [s]
-    np.random.shuffle(T60_options)
-    T60 = T60_options[0]
+    T60 = random.choice(args.T60_options)
 
     # Source
-    source_min_height = 1.5                 # source miminum height (default: 1.5)
-    source_max_height = 2                   # source maximun height (default: 2)
-    source_min_radius = 1.5                 # source localization/walking minimum radius (default: 1.5)
-    source_max_radius = 1.7                 # source localization/walking maximum radius (default: 1.7)
-    DOA_grid_lag = 5                        # degrees
+    source_min_height = args.source_min_height
+    source_max_height = args.source_max_height
+    source_min_radius = args.source_min_radius
+    source_max_radius = args.source_max_radius
+    DOA_grid_lag = args.DOA_grid_lag
 
-    margin = 0.5                            # Margin distance between the source/mics to the walls
+    margin = args.margin
     
     while True:
         src_mics_info = []
@@ -145,7 +118,7 @@ def generate_scenes(args, scene_type, files_num):
         mics_pos_arr = mics_pos_arr.T
         
         # Randomize mic array orientation
-        rotation_angle = np.random.uniform(0, np.pi)
+        rotation_angle = np.random.uniform(0.001, np.pi)
         rotation_matrix = np.array([
             [np.cos(rotation_angle), -np.sin(rotation_angle), 0],
             [np.sin(rotation_angle),  np.cos(rotation_angle), 0],
@@ -155,6 +128,7 @@ def generate_scenes(args, scene_type, files_num):
         mic_array_center = np.mean(mics_pos_agg, axis=0) # array center
 
         # Draw a source position
+        eps = sys.float_info.epsilon
         src_angle = np.radians(np.arange(0.001, 180, DOA_grid_lag)+np.degrees(rotation_angle))
         src_radius = np.random.uniform(source_min_radius, source_max_radius, size=len(src_angle))
 
@@ -197,11 +171,11 @@ def generate_scenes(args, scene_type, files_num):
 
 def plot_scene(scene, save_path, index):
     """
-    CURRENTLY DOSENT SUPPORT MULTIPY SRC LOCATION- TBD
     Plots the room shape, microphone array and speaker
     :param scene: scene parameters
     :param save_path: saving path for figure generated
     :param index: outside loop index to support multiplay plots in folder
+    # NOTE :  this plot is unclear use plot_scene_interactive
     """
     room_dim = scene['room_dim']
     src_pos = scene['src_pos']
@@ -245,6 +219,7 @@ def plot_scene_interactive(scene, save_path, index):
     :param save_path: saving path for the figure generated
     :param index: outside loop index to support multiple plots in folder
     """
+    save_path = os.path.join(save_path, 'plots')
     os.makedirs(save_path, exist_ok=True)
 
     room_dim = scene['room_dim']
