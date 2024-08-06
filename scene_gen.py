@@ -10,12 +10,9 @@ import matplotlib.pyplot as plt
 def critical_distance(V, T60):
     """ critical_distance determine the distance from a sound source at which the sound field transitions from 
     being dominated by the direct sound to being dominated by the reverberant sound in a given environment
-    Args:
-        V (_type_): room volume [m^3]
-        T60 (_type_): room reverberation time [s]
-
-    Returns:
-        critical_distance: explained in the description
+    :param V: room volume [m^3]
+    :param T60: room reverberation time [s]
+    :return: critical_distance: explained in the description
     """
     return 0.057*np.sqrt(V/T60)
 
@@ -23,7 +20,6 @@ def critical_distance(V, T60):
 def calculate_doa(src_pos, mic_pos):
     """
     Calculate the Direction of Arrival (DOA) from the center of the microphone array to the source positions in angles.
-    
     :param src_pos: The positions of the sources [3, n_sources].
     :param mic_pos: A list of positions of the microphones [[x1, y1, z1], [x2, y2, z2], ...].
     :return: The DOA azimuth angles in degrees.
@@ -62,9 +58,8 @@ def generate_scenes(args):
     """
     Generates random rooms with random source and microphones positions
     :param args: from parser
-    :return: A dictionary with the room size and source and microphone positions.
+    :return: generated scene- [dictionary] source, microphone and room information
     """
-    
     # Array size
     mics_num = args.mics_num
     mic_min_spacing = args.mic_min_spacing
@@ -132,7 +127,6 @@ def generate_scenes(args):
         src_angle = np.radians(np.arange(0.001, 180, DOA_grid_lag)+np.degrees(rotation_angle))
         src_radius = np.random.uniform(source_min_radius, source_max_radius, size=len(src_angle))
 
-        src_angle_deg = np.degrees(src_angle)
         src_x = np.multiply(src_radius, np.cos(src_angle)) + mic_array_center[0]
         src_y = np.multiply(src_radius, np.sin(src_angle)) + mic_array_center[1]
         
@@ -144,8 +138,7 @@ def generate_scenes(args):
         # Verify if all source positions are within the room dimensions considering the margin from the walls
         if np.all((margin < src_x) & (src_x < room_dim[0] - margin)) and np.all((margin < src_y) & (src_y < room_dim[1] - margin)):
             break
-            
-
+                
     # Compute distances between mics and source position
     src_pos_expanded = src_pos.T[:, np.newaxis, :]  # Shape: (src_pos, 1, dim)
     mics_pos_expanded = mics_pos_arr.T[np.newaxis, :, :]  # Shape: (1, num_mic, dim)

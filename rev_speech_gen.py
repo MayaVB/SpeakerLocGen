@@ -16,8 +16,9 @@ from rir_gen import generate_rirs
 def select_random_speaker(speakers_dir_clean):
     """
     Selects a random speaker directory and returns the speaker name and all .wav files in that directory.
-    :param speakers_dir_clean: Path to the directory containing speaker directories.
-    :return: A tuple (speaker_name, list of .wav file paths) where speaker_name is the name of the selected speaker directory.
+    :param speakers_dir_clean: Path to the directory containing speaker directories
+    :return: selected_dir: Name of the selected speaker directory
+             wav_files: List of all .wav files in the selected speaker directory
     """
     # List all directories in the speakers_dir_clean
     speaker_dirs = [d for d in os.listdir(speakers_dir_clean) if os.path.isdir(os.path.join(speakers_dir_clean, d))]
@@ -42,8 +43,11 @@ def select_random_speaker(speakers_dir_clean):
 
 def save_data_h5py(rev_signals, scene, scene_idx, src_pos_index, speaker_out_dir=[]):
     """
+    Save wav data and label DOA in two groups, this is done for each scene and for each source position
     :param rev_signals: reverberent signals
     :param scene: scene parameters
+    :param scene_idx: scene index
+    :param src_pos_index: source position index
     :param speaker_out_dir: directory where the dataset is stored (defults is home dir)
     """
     # os.makedirs(speaker_out_dir, exist_ok=True)
@@ -75,6 +79,11 @@ def round_numbers(list_in):
 
 
 def write_scene_to_file(scenes, file_name):
+    """
+    print scene info to a txt file
+    :param scenes: list of dict containing info about the scenario generated
+    :param file_name: file name to save the info
+    """
     with open (file_name, 'w') as f:
         for scene in scenes:
             f.write(f"Room size: {round_numbers(scene['room_dim'])}\n")
@@ -94,19 +103,20 @@ def write_scene_to_file(scenes, file_name):
 def generate_rev_speech(args):
     """
     :param args: From Parser
-    :param save_rev_speech_dir: Directory to save the generated files
-    :param snr: SNR for noise addition
-    :return: scene_agg
+    :return: scene_agg: scence list of dict containing info about the scenario generated
     """
-    
     scene_agg = []
     clean_speech_dir = args.clean_speech_dir
     num_scenes = args.num_scenes
     snr = args.snr
     
     # determine output folder
-    timestamp = (datetime.now()+ timedelta(hours=3)).strftime('%Y%m%d_%H%M%S')
-    save_rev_speech_dir = os.path.join(args.output_folder, f'{args.split}_{timestamp}')
+    # timestamp = (datetime.now()+ timedelta(hours=3)).strftime('%Y%m%d_%H%M%S')
+    # save_rev_speech_dir = os.path.join(args.output_folder, f'{args.split}_{timestamp}')
+    
+    save_rev_speech_dir = os.path.join(args.output_folder, args.split)
+    if os.path.exists(save_rev_speech_dir):
+        os.remove(save_rev_speech_dir)
     
     # Generate reverberant speech files
     for scene_idx in range(num_scenes):
@@ -134,8 +144,9 @@ def generate_rev_speech(args):
             # Read a clean file
             s, fs = sf.read(curr_wav_file_path)            
 
-            # Generate RIR for the current source position for all mic posiitons
-            # this can be done for all together- but lfilter cannot so i keep this inside src_pos loop
+            # Generate RIR for the current source position for all mic positons
+            # Basically- this RIR's can be generated for src_pos together- but lfilter cant filter all 
+            # atm we keep this inside src_pos loop 
             RIRs = generate_rirs(scene['room_dim'], curr_src_pos, scene['mic_pos'], scene['RT60'], fs)
 
             # Generate reverberant speech for each mic
@@ -146,7 +157,7 @@ def generate_rev_speech(args):
             # Normalize
             rev_signals = rev_signals / np.max(np.abs(rev_signals)) / 1.1  
 
-            # BIUREV-N -- Add noise
+            # Add noise
             if args.dataset == 'add_noise':
                 # furthest_mic = np.argmax(scene['dists'])
                 furthest_mic = 1 # not calaulated
@@ -158,19 +169,19 @@ def generate_rev_speech(args):
                 rev_signals += noise
                 rev_signals = rev_signals / np.max(np.abs(rev_signals)) / 1.1  # Normalize
 
-                # Create a directory in which wav will be saved for examine
+                # Create a directory in which wavs will be saved
                 speaker_wav_dir = os.path.join(save_rev_speech_dir, 'RevMovingSrcDatasetWavs', f'scene_{scene_idx + 1}', selected_speaker, f'src_pos{index + 1}')
                 os.makedirs(speaker_wav_dir, exist_ok=True)
                 
             # Save data as wavs
-            save_wavs(rev_signals, 0, speaker_wav_dir, fs) # Save wav signals to disk
+            save_wavs(rev_signals, 0, speaker_wav_dir, fs)
 
             # Save data as h5py file
             save_data_h5py(rev_signals, scene, scene_idx, index, save_rev_speech_dir)
                         
         scene_agg.append(scene)
         
-        # save scene info to txt
+        # save scene info txt file
         write_scene_to_file(scene_agg, os.path.join(save_rev_speech_dir, 'train_info.txt'))
 
     return scene_agg
@@ -188,7 +199,7 @@ if __name__ == '__main__':
     parser.add_argument("--output_folder", type=str, default='', help="Directory where the ourput is saved")
 
     # scene parameters
-    parser.add_argument("--num_scenes", type=int, default=5, help="Number of scenarios to generate")
+    parser.add_argument("--num_scenes", type=int, default=10, help="Number of scenarios to generate")
     parser.add_argument("--mics_num", type=int, default=5, help="Number of microphones in the array")
     parser.add_argument("--mic_min_spacing", type=float, default=0.03, help="Minimum spacing between microphones")
     parser.add_argument("--mic_max_spacing", type=float, default=0.08, help="Maximum spacing between microphones")
@@ -214,7 +225,7 @@ if __name__ == '__main__':
     args = parser.parse_args()
     
     
-    ## ======= Main: generate data for training/validation ======= ##
+    ## ======= Main: Generate data for training/validation ======= ##
     if args.split == 'train':
         scenes = generate_rev_speech(args)
         
