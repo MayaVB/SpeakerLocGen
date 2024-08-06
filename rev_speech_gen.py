@@ -1,15 +1,16 @@
-from scene_gen import generate_scenes, plot_scene, plot_scene_interactive
-from utils import read_hdf5_file
-from rir_gen import generate_rirs
-import numpy as np
-import pathlib
 from scipy.signal import lfilter
 import soundfile as sf
+import numpy as np
+
 import argparse
 import h5py
 import os
 import random
+from datetime import datetime, timedelta
 
+from scene_gen import generate_scenes, plot_scene, plot_scene_interactive
+# from utils import read_hdf5_file
+from rir_gen import generate_rirs
 
 
 def select_random_speaker(speakers_dir_clean):
@@ -45,20 +46,27 @@ def save_data_h5py(rev_signals, scene, scene_idx, src_pos_index, speaker_out_dir
     :param scene: scene parameters
     :param speaker_out_dir: directory where the dataset is stored (defults is home dir)
     """
-    os.makedirs(speaker_out_dir, exist_ok=True)
-    dataset_path = os.path.join(speaker_out_dir, "RevMovingSrcDataset.h5")
+    # os.makedirs(speaker_out_dir, exist_ok=True)
+    
+    dataset_path = os.path.join(speaker_out_dir, 'RevMovingSrcDataset.h5')
 
     with h5py.File(dataset_path, 'a') as h5f:
         group_name = f"sceneIndx_{scene_idx}_roomDim_{scene['room_dim']}_rt60_{scene['RT60']}_srcPosInd_{src_pos_index}"
         grp = h5f.create_group(group_name)
         grp.create_dataset(f'signals_', data=rev_signals)
         grp.create_dataset(f'speaker_DOA_', data=scene['DOA_az'][src_pos_index])
-
+                
+        # Increment the dataset length
+        if 'data_len' in h5f.attrs:
+            h5f.attrs['data_len'] += 1
+        else:
+            h5f.attrs['data_len'] = 1
+        
 
 def save_wavs(rev_signals, file, speaker_out_dir, fs):
     for j, sig in enumerate(rev_signals, 1):
         out_file_name = '_ch{}'.format(j) + '.wav' 
-        out_file_path = speaker_out_dir / out_file_name
+        out_file_path = os.path.join(speaker_out_dir, out_file_name)
         sf.write(out_file_path, sig, fs)
 
 
@@ -76,37 +84,41 @@ def write_scene_to_file(scenes, file_name):
             mics_num = len(scene['mic_pos'])
             for i in range(mics_num):
                 pos = round_numbers(scene['mic_pos'][i])
-                dist = round(scene['dists'][i], 4)
+                dist = round_numbers(scene['dists'][i])
                 f.write(f"Mic{i} pos\t: {pos}, dist:{dist}\n")
             f.write('\n\n\n')
             f.flush()
     return
 
 
-def generate_rev_speech(args, scene_type, clean_speech_dir, save_rev_speech_dir, num_scenes=5, snr=20):
+def generate_rev_speech(args):
     """
     :param args: From Parser
-    :param scene_type: 'near' / 'far' / 'random' / 'winning_ticket'
-    :param clean_speech_dir: Directory where the clean speech files are stored
     :param save_rev_speech_dir: Directory to save the generated files
-    :param num_scenes: Number of scenes (rooms) to generate
-    :param snr: SNR for BIUREV-N
-    :return:
+    :param snr: SNR for noise addition
+    :return: scene_agg
     """
-    # Get all sub directories (speakers)
+    
     scene_agg = []
-
+    clean_speech_dir = args.clean_speech_dir
+    num_scenes = args.num_scenes
+    snr = args.snr
+    
+    # determine output folder
+    timestamp = (datetime.now()+ timedelta(hours=3)).strftime('%Y%m%d_%H%M%S')
+    save_rev_speech_dir = os.path.join(args.output_folder, f'{args.split}_{timestamp}')
+    
     # Generate reverberant speech files
     for scene_idx in range(num_scenes):
         
         selected_speaker, wav_files = select_random_speaker(clean_speech_dir)
 
         # Generate a scene
-        scene = generate_scenes(1, scene_type, len(wav_files))[0]
+        scene = generate_scenes(args)[0]
         mics_num = len(scene['mic_pos'])
         
-        # plot a cool html plot
-        plot_scene_interactive(scene, 'Plots', scene_idx)
+        # plot an interactive scene plot for each scenarion
+        plot_scene_interactive(scene, save_rev_speech_dir, scene_idx)
         
         # for index, wav_file in enumerate(wav_files):
         for index, _ in enumerate(scene['src_pos'][0]):
@@ -147,64 +159,62 @@ def generate_rev_speech(args, scene_type, clean_speech_dir, save_rev_speech_dir,
                 rev_signals = rev_signals / np.max(np.abs(rev_signals)) / 1.1  # Normalize
 
                 # Create a directory in which wav will be saved for examine
-                speaker_out_dir = save_rev_speech_dir / args.split / f'scene_{scene_idx + 1}' / selected_speaker / f'src_pos{index + 1}' 
-                speaker_out_dir.mkdir(parents=True, exist_ok=True)
+                speaker_wav_dir = os.path.join(save_rev_speech_dir, 'RevMovingSrcDatasetWavs', f'scene_{scene_idx + 1}', selected_speaker, f'src_pos{index + 1}')
+                os.makedirs(speaker_wav_dir, exist_ok=True)
+                
+            # Save data as wavs
+            save_wavs(rev_signals, 0, speaker_wav_dir, fs) # Save wav signals to disk
 
-            # Save wavs
-            save_wavs(rev_signals, 0, speaker_out_dir, fs) # Save wav signals to disk
-
-            # Save signals to h5py file
-            dataset_sav_folder = 'Results'
-            save_data_h5py(rev_signals, scene, scene_idx, index, dataset_sav_folder)
+            # Save data as h5py file
+            save_data_h5py(rev_signals, scene, scene_idx, index, save_rev_speech_dir)
                         
         scene_agg.append(scene)
         
-    return scene_agg
+        # save scene info to txt
+        write_scene_to_file(scene_agg, os.path.join(save_rev_speech_dir, 'train_info.txt'))
 
+    return scene_agg
 
 
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(
-        description="Simulates and adds reverberation to a dry sound sample."
+        description="Simulates and adds reverberation to a clean sound sample."
     )
+    # general parameters
     parser.add_argument("--split", choices=['train', 'val', 'test'], default='train', help="Generate training, val or test")
-    parser.add_argument("--dataset", choices=['BIUREV', 'add_noise', 'both'], default='add_noise', help="Generate BIUREV/BIUREV-N/both")
+    parser.add_argument("--dataset", choices=['None', 'add_noise'], default='add_noise')
+    parser.add_argument("--clean_speech_dir", type=str, default='../dataset_folder', help="Directory where the clean speech files are stored")
+    parser.add_argument("--output_folder", type=str, default='', help="Directory where the ourput is saved")
+
+    # scene parameters
+    parser.add_argument("--num_scenes", type=int, default=5, help="Number of scenarios to generate")
+    parser.add_argument("--mics_num", type=int, default=5, help="Number of microphones in the array")
+    parser.add_argument("--mic_min_spacing", type=float, default=0.03, help="Minimum spacing between microphones")
+    parser.add_argument("--mic_max_spacing", type=float, default=0.08, help="Maximum spacing between microphones")
+    parser.add_argument("--mic_height", type=float, default=1.7, help="Height of the microphone array from the floor")
+
+    parser.add_argument("--room_len_x_min", type=float, default=4, help="Minimum length of the room in x-direction")
+    parser.add_argument("--room_len_x_max", type=float, default=7, help="Maximum length of the room in x-direction")
+    parser.add_argument("--aspect_ratio_min", type=float, default=1, help="Minimum aspect ratio of the room")
+    parser.add_argument("--aspect_ratio_max", type=float, default=1.5, help="Maximum aspect ratio of the room")
+    parser.add_argument("--room_len_z_min", type=float, default=2.3, help="Minimum length of the room in z-direction")
+    parser.add_argument("--room_len_z_max", type=float, default=2.9, help="Maximum length of the room in z-direction")
+
+    parser.add_argument("--T60_options", type=float, nargs='+', default=[0.2, 0.4, 0.6, 0.8], help="List of T60 values for the room")
+    parser.add_argument("--snr", type=float, default=20, help="added noise snr value [dB]")
+
+    parser.add_argument("--source_min_height", type=float, default=1.5, help="Minimum height of the source")
+    parser.add_argument("--source_max_height", type=float, default=2, help="Maximum height of the source")
+    parser.add_argument("--source_min_radius", type=float, default=1.5, help="Minimum radius for source localization")
+    parser.add_argument("--source_max_radius", type=float, default=1.7, help="Maximum radius for source localization")
+    parser.add_argument("--DOA_grid_lag", type=float, default=5, help="Degrees for DOA grid lag")
+
+    parser.add_argument("--margin", type=float, default=0.5, help="Margin distance between the source/mics to the walls")  
     args = parser.parse_args()
-
-    #################################### Generate training data ####################################
-
-    save_rev_speech_dir = pathlib.Path('/src/Results')
+    
+    
+    ## ======= Main: generate data for training/validation ======= ##
     if args.split == 'train':
-        clean_speech_dir = pathlib.Path('../dataset_folder')
-        scene_type = 'random'
-        generate_rev_speech(args, scene_type, clean_speech_dir, save_rev_speech_dir)
-        # write_scene_to_file(scenes, 'train_random.txt')
-
-    #################################### Generate validation data ####################################
-
-    elif args.split == 'val':
-        clean_speech_dir = pathlib.Path('/mnt/dsi_vol1/users/yochai_yemini/REVERB/SimData/REVERB_WSJCAM0_dt/data/cln_test/')
-
-        scenes = generate_rev_speech(args, 'near', clean_speech_dir, save_rev_speech_dir)
-        # write_scene_to_file(scenes, 'val_near.txt')
-
-        generate_rev_speech(args, 'far', clean_speech_dir, save_rev_speech_dir)
-        # write_scene_to_file(scenes, 'val_far.txt')
-
-    #################################### Generate test data ####################################
-    elif args.split == 'test':
-        clean_speech_dir = pathlib.Path(
-            '/mnt/dsi_vol1/users/yochai_yemini/REVERB/SimData/REVERB_WSJCAM0_et/data/cln_test/')
-
-        scenes = generate_rev_speech(args, 'near', clean_speech_dir, save_rev_speech_dir)
-        # write_scene_to_file(scenes, 'test_near.txt')
-
-        scenes = generate_rev_speech(args, 'far', clean_speech_dir, save_rev_speech_dir)
-        # write_scene_to_file(scenes, 'test_far.txt')
-
-        scenes = generate_rev_speech(args, 'random', clean_speech_dir, save_rev_speech_dir)
-        # write_scene_to_file(scenes, 'test_random.txt')
-
-        scenes = generate_rev_speech(args, 'winning_ticket', clean_speech_dir, save_rev_speech_dir)
-        # write_scene_to_file(scenes, 'test_winning_ticket.txt')
+        scenes = generate_rev_speech(args)
+        
