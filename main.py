@@ -115,8 +115,8 @@ def generate_rev_speech(args):
     # save_rev_speech_dir = os.path.join(args.output_folder, f'{args.split}_{timestamp}')
     
     save_rev_speech_dir = os.path.join(args.output_folder, args.split)
-    if os.path.exists(save_rev_speech_dir):
-        os.remove(save_rev_speech_dir)
+    # if os.path.exists(save_rev_speech_dir):
+        # os.remove(save_rev_speech_dir)
     
     # Generate reverberant speech files
     for scene_idx in range(num_scenes):
@@ -199,7 +199,7 @@ if __name__ == '__main__':
     parser.add_argument("--output_folder", type=str, default='', help="Directory where the ourput is saved")
 
     # scene parameters
-    parser.add_argument("--num_scenes", type=int, default=10, help="Number of scenarios to generate")
+    parser.add_argument("--num_scenes", type=int, default=30, help="Number of scenarios to generate")
     parser.add_argument("--mics_num", type=int, default=5, help="Number of microphones in the array")
     parser.add_argument("--mic_min_spacing", type=float, default=0.03, help="Minimum spacing between microphones")
     parser.add_argument("--mic_max_spacing", type=float, default=0.08, help="Maximum spacing between microphones")
