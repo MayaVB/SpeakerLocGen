@@ -56,109 +56,124 @@ def calculate_doa(src_pos, mic_pos):
 
 def generate_scenes(args):
     """
-    Generates random rooms with random source and microphones positions
-    :param args: from parser
-    :return: generated scene- [dictionary] source, microphone and room information
-    """
-    # Array size
-    mics_num = args.mics_num
-    mic_min_spacing = args.mic_min_spacing
-    mic_max_spacing = args.mic_max_spacing
-    mic_height = args.mic_height
-
-    # Room's size
-    room_len_x_min = args.room_len_x_min
-    room_len_x_max = args.room_len_x_max
-    aspect_ratio_min = args.aspect_ratio_min
-    aspect_ratio_max = args.aspect_ratio_max
-    room_len_z_min = args.room_len_z_min
-    room_len_z_max = args.room_len_z_max
-
-    # Room's T60 value
-    T60 = random.choice(args.T60_options)
-
-    # Source
-    source_min_height = args.source_min_height
-    source_max_height = args.source_max_height
-    source_min_radius = args.source_min_radius
-    source_max_radius = args.source_max_radius
-    DOA_grid_lag = args.DOA_grid_lag
-
-    margin = args.margin
+    Generates random rooms with random source and microphone positions.
     
+    :param args: Input arguments from a parser that contains the room and array configuration parameters.
+    :return: A list of dictionaries containing source, microphone, and room information.
+    """
+    # Microphone array parameters
+    mics_num = args.mics_num                 # Number of microphones in the array
+    mic_min_spacing = args.mic_min_spacing   # Minimum spacing between microphones
+    mic_max_spacing = args.mic_max_spacing   # Maximum spacing between microphones
+    mic_height = args.mic_height             # Fixed height of the microphones
+
+    # Room dimensions (lengths and aspect ratios)
+    room_len_x_min = args.room_len_x_min     # Minimum room length in x-direction
+    room_len_x_max = args.room_len_x_max     # Maximum room length in x-direction
+    aspect_ratio_min = args.aspect_ratio_min # Minimum aspect ratio (length y to length x)
+    aspect_ratio_max = args.aspect_ratio_max # Maximum aspect ratio (length y to length x)
+    room_len_z_min = args.room_len_z_min     # Minimum room length in z-direction (height)
+    room_len_z_max = args.room_len_z_max     # Maximum room length in z-direction (height)
+
+    # Reverberation time (T60) selection from predefined options
+    T60 = random.choice(args.T60_options)   # Randomly choose T60 from available options
+
+    # Source parameters
+    source_min_height = args.source_min_height   # Minimum height of the source
+    source_max_height = args.source_max_height   # Maximum height of the source
+    source_min_radius = args.source_min_radius   # Minimum radial distance from the microphone array
+    source_max_radius = args.source_max_radius   # Maximum radial distance from the microphone array
+    DOA_grid_lag = args.DOA_grid_lag             # Angle step for DOA grid calculation
+
+    # Minimum margin to ensure the microphones and source are not too close to room walls
+    margin = args.margin
+
     while True:
         src_mics_info = []
 
-        # Draw the room's dimensions
+        # Randomly determine room dimensions
         room_len_x = np.random.uniform(room_len_x_min, room_len_x_max)
         room_len_z = np.random.uniform(room_len_z_min, room_len_z_max)
         aspect_ratio = np.random.uniform(aspect_ratio_min, aspect_ratio_max)
-        room_len_y = room_len_x * aspect_ratio
-        room_dim = [*np.random.permutation([room_len_x, room_len_y]), room_len_z]
+        room_len_y = room_len_x * aspect_ratio  # Calculate room length in y-direction using aspect ratio
+        room_dim = [*np.random.permutation([room_len_x, room_len_y]), room_len_z]  # Shuffle x, y for variability
 
-        # Generate ULA microphone positions with margin from room walls
+        # Generate ULA microphone positions with spacing and margin constraints
         mic_spacing = np.random.uniform(mic_min_spacing, mic_max_spacing)
         mic_pos_start = np.random.uniform(margin, room_dim[0] - margin - (mics_num - 1) * mic_spacing)
         mic_pos_y = np.random.uniform(margin, room_dim[1] - margin)
-        mic_pos_z = mic_height
+        mic_pos_z = mic_height  # Fixed height for all microphones
 
-        mics_pos_agg = []
-        mics_pos_arr = np.zeros((mics_num, 3))
+        mics_pos_agg = []  # Aggregate array to store positions
+        mics_pos_arr = np.zeros((mics_num, 3))  # Preallocate mic position array
+
+        # Compute microphone positions along the x-axis
         for mic in range(mics_num):
             mic_x = mic_pos_start + mic * mic_spacing
             mic_pos = [mic_x, mic_pos_y, mic_pos_z]
-            mics_pos_agg.append(mic_pos)
-            mics_pos_arr[mic] = mic_pos  # Directly assign to the preallocated array
+            mics_pos_agg.append(mic_pos)  # Append position to list
+            mics_pos_arr[mic] = mic_pos   # Store position in the preallocated array
 
-        mics_pos_arr = mics_pos_arr.T
-        
-        # Randomize mic array orientation
-        rotation_angle = np.random.uniform(0.001, np.pi)
+        mics_pos_arr = mics_pos_arr.T  # Transpose for easier calculations later
+
+        # Randomize the orientation of the microphone array by applying a rotation
+        rotation_angle = np.random.uniform(0.001, np.pi)  # Random rotation angle between 0 and π
         rotation_matrix = np.array([
             [np.cos(rotation_angle), -np.sin(rotation_angle), 0],
             [np.sin(rotation_angle),  np.cos(rotation_angle), 0],
             [0, 0, 1]
-        ])
-        mics_pos_agg = [rotation_matrix.dot(np.array(mic) - np.array([room_dim[0] / 2, room_dim[1] / 2, 0])) + np.array([room_dim[0] / 2, room_dim[1] / 2, 0]) for mic in mics_pos_agg]
-        mic_array_center = np.mean(mics_pos_agg, axis=0) # array center
+        ])  # 2D rotation matrix for rotation around the z-axis
 
-        # Draw a source position
-        eps = sys.float_info.epsilon
-        src_angle = np.radians(np.arange(0.001, 180, DOA_grid_lag)+np.degrees(rotation_angle))
-        src_radius = np.random.uniform(source_min_radius, source_max_radius, size=len(src_angle))
+        # Rotate microphone positions and translate back to original coordinates
+        mics_pos_agg = [
+            rotation_matrix.dot(np.array(mic) - np.array([room_dim[0] / 2, room_dim[1] / 2, 0])) + np.array([room_dim[0] / 2, room_dim[1] / 2, 0])
+            for mic in mics_pos_agg
+        ]
 
+        # Find the center of the microphone array
+        mic_array_center = np.mean(mics_pos_agg, axis=0)
+
+        # Generate source positions around the microphone array within a defined radial range
+        eps = sys.float_info.epsilon  # Smallest possible float value for numerical stability
+        src_angle = np.radians(np.arange(0.001, 180, DOA_grid_lag) + np.degrees(rotation_angle))  # Calculate angles
+        src_radius = np.random.uniform(source_min_radius, source_max_radius, size=len(src_angle))  # Random radii
+
+        # Convert polar coordinates (angle, radius) to Cartesian coordinates (x, y)
         src_x = np.multiply(src_radius, np.cos(src_angle)) + mic_array_center[0]
         src_y = np.multiply(src_radius, np.sin(src_angle)) + mic_array_center[1]
-        
-        # Ensure src_z has the same size as src_x and src_y
+
+        # Randomly assign source heights
         src_z = np.random.uniform(source_min_height, source_max_height, size=src_x.shape)
-        
+
+        # Stack source positions as a (3, N) array (x, y, z)
         src_pos = np.array([src_x, src_y, src_z])
 
-        # Verify if all source positions are within the room dimensions considering the margin from the walls
+        # Verify that the source positions are within the room boundaries, considering the margin
         if np.all((margin < src_x) & (src_x < room_dim[0] - margin)) and np.all((margin < src_y) & (src_y < room_dim[1] - margin)):
             break
-                
-    # Compute distances between mics and source position
-    src_pos_expanded = src_pos.T[:, np.newaxis, :]  # Shape: (src_pos, 1, dim)
-    mics_pos_expanded = mics_pos_arr.T[np.newaxis, :, :]  # Shape: (1, num_mic, dim)
-    dists = np.linalg.norm(src_pos_expanded - mics_pos_expanded, axis=2) # substruction is of size (src_pos, num_mic, dim)
-       
-    # Compute critical distance
+
+    # Calculate distances between the microphones and each source position
+    src_pos_expanded = src_pos.T[:, np.newaxis, :]  # Expand source position array shape: (num_sources, 1, 3)
+    mics_pos_expanded = mics_pos_arr.T[np.newaxis, :, :]  # Expand mic position array shape: (1, num_mics, 3)
+    dists = np.linalg.norm(src_pos_expanded - mics_pos_expanded, axis=2)  # Calculate Euclidean distances
+
+    # Compute the critical distance based on room volume and T60
     critic_dist = critical_distance(np.prod(room_dim), T60)
 
-    # calculate DOA
+    # Calculate Direction of Arrival (DOA) angles (azimuth and elevation)
     az_DOA, el_DOA = calculate_doa(src_pos, np.array(mics_pos_agg))
-        
+
+    # Append all relevant information to the scene list
     src_mics_info.append({
-        'room_dim': room_dim, 
-        'src_pos': src_pos,
-        'mic_pos': np.array(mics_pos_agg),
-        'critic_dist': critic_dist, 
-        'dists': dists, 
-        'RT60': T60, 
-        'DOA_az': az_DOA})
-    
+        'room_dim': room_dim,          # Room dimensions (x, y, z)
+        'src_pos': src_pos,            # Source positions (x, y, z)
+        'mic_pos': np.array(mics_pos_agg),  # Microphone positions (x, y, z)
+        'critic_dist': critic_dist,    # Critical distance
+        'dists': dists,                # Distances between mics and sources
+        'RT60': T60,                   # Reverberation time
+        'DOA_az': az_DOA               # Azimuth DOA of the source
+    })
+
     return src_mics_info
         
 

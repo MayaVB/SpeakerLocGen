@@ -6,10 +6,9 @@ import argparse
 import h5py
 import os
 import random
-from datetime import datetime, timedelta
+# from datetime import datetime, timedelta
 
-from scene_gen import generate_scenes, plot_scene, plot_scene_interactive
-# from utils import read_hdf5_file
+from scene_gen import generate_scenes, plot_scene_interactive
 from rir_gen import generate_rirs
 
 
@@ -51,7 +50,6 @@ def save_data_h5py(rev_signals, scene, scene_idx, src_pos_index, speaker_out_dir
     :param speaker_out_dir: directory where the dataset is stored (defults is home dir)
     """
     # os.makedirs(speaker_out_dir, exist_ok=True)
-    
     dataset_path = os.path.join(speaker_out_dir, 'RevMovingSrcDataset.h5')
 
     with h5py.File(dataset_path, 'a') as h5f:
@@ -109,10 +107,6 @@ def generate_rev_speech(args):
     clean_speech_dir = args.clean_speech_dir
     num_scenes = args.num_scenes
     snr = args.snr
-    
-    # determine output folder
-    # timestamp = (datetime.now()+ timedelta(hours=3)).strftime('%Y%m%d_%H%M%S')
-    # save_rev_speech_dir = os.path.join(args.output_folder, f'{args.split}_{timestamp}')
     
     save_rev_speech_dir = os.path.join(args.output_folder, args.split)
     # if os.path.exists(save_rev_speech_dir):
