@@ -57,6 +57,7 @@ def save_data_h5py(rev_signals, scene, scene_idx, src_pos_index, speaker_out_dir
         grp = h5f.create_group(group_name)
         grp.create_dataset(f'signals_', data=rev_signals)
         grp.create_dataset(f'speaker_DOA_', data=scene['DOA_az'][src_pos_index])
+        grp.create_dataset(f'reverberation_time_', data=scene['RT60'])
                 
         # Increment the dataset length
         if 'data_len' in h5f.attrs:
@@ -85,6 +86,7 @@ def write_scene_to_file(scenes, file_name):
     with open (file_name, 'w') as f:
         for scene in scenes:
             f.write(f"Room size: {round_numbers(scene['room_dim'])}\n")
+            f.write(f"Reverberation time: {round(scene['RT60'])}\n")
             f.write(f"Critical distance: {round(scene['critic_dist'], 4)}\n")
             pos = round_numbers(scene['src_pos'][0])
             f.write(f"Source position: {pos}\n")
@@ -193,7 +195,7 @@ if __name__ == '__main__':
     parser.add_argument("--output_folder", type=str, default='', help="Directory where the ourput is saved")
 
     # scene parameters
-    parser.add_argument("--num_scenes", type=int, default=30, help="Number of scenarios to generate")
+    parser.add_argument("--num_scenes", type=int, default=3, help="Number of scenarios to generate")
     parser.add_argument("--mics_num", type=int, default=5, help="Number of microphones in the array")
     parser.add_argument("--mic_min_spacing", type=float, default=0.03, help="Minimum spacing between microphones")
     parser.add_argument("--mic_max_spacing", type=float, default=0.08, help="Maximum spacing between microphones")
