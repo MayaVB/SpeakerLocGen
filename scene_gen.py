@@ -7,6 +7,34 @@ import plotly.graph_objects as go
 import matplotlib.pyplot as plt
 
 
+def select_random_speaker(speakers_dir_clean):
+    """
+    Selects a random speaker directory and returns the speaker name and all .wav files in that directory.
+    :param speakers_dir_clean: Path to the directory containing speaker directories
+    :return: selected_dir: Name of the selected speaker directory
+             wav_files: List of all .wav files in the selected speaker directory
+    """
+    # List all directories in the speakers_dir_clean
+    speaker_dirs = [d for d in os.listdir(speakers_dir_clean) if os.path.isdir(os.path.join(speakers_dir_clean, d))]
+
+    # Ensure there are directories in the speakers_dir_clean
+    if not speaker_dirs:
+        raise ValueError("No speaker directories found in the directory.")
+
+    # Select a random directory
+    selected_dir = random.choice(speaker_dirs)
+    selected_dir_path = os.path.join(speakers_dir_clean, selected_dir)
+
+    # List all .wav files in the selected directory
+    wav_files = [os.path.join(selected_dir_path, f) for f in os.listdir(selected_dir_path) if f.endswith('.wav')]
+
+    # Ensure there are .wav files in the selected directory
+    if not wav_files:
+        raise ValueError("No .wav files found in the selected speaker directory.")
+
+    return selected_dir, wav_files
+
+
 def critical_distance(V, T60):
     """ critical_distance determine the distance from a sound source at which the sound field transitions from 
     being dominated by the direct sound to being dominated by the reverberant sound in a given environment
