@@ -10,7 +10,7 @@ import random
 from scene_gen import select_random_speaker, generate_scenes, plot_scene_interactive
 from rir_gen import generate_rirs
 from utils import save_wavs, write_scene_to_file, save_data_h5py
-
+from processing import add_ar1_noise_to_signals
 
 def generate_rev_speech(args):
     """
@@ -46,11 +46,25 @@ def generate_rev_speech(args):
             if len(wav_files) < len(scene['src_pos'][0]):
                 raise Exception("speaker wav files are lower then requested speaker location- not enough files!") 
 
+            # check wav length
+            s, fs = sf.read(curr_wav_file_path) 
+            if len(s)/fs > args.minimum_sentence_len:
+                wav_verified = True
+            else:
+                wav_verified = False
+
+            while not wav_verified:
+
+                # Read a clean file
+                s, fs = sf.read(curr_wav_file_path)  
+                if len(s)/fs < args.minimum_sentence_len:
+                    curr_wav_file_path = random.choice(wav_files)
+                else:
+                    wav_verified = True
+
             print('Processing Scene %d/%d. Speaker: %s, wav file processed: %s, wav file number: %d.' % (
                 scene_idx + 1, num_scenes, selected_speaker, os.path.basename(curr_wav_file_path), index + 1))
 
-            # Read a clean file
-            s, fs = sf.read(curr_wav_file_path)            
 
             # Generate RIR for the current source position for all mic positons
             # Basically- this RIR's can be generated for src_pos together- but lfilter cant filter all 
@@ -67,16 +81,18 @@ def generate_rev_speech(args):
 
             # Add noise
             if args.dataset == 'add_noise':
-                furthest_mic = 2 # not calaulated
+                # furthest_mic = 2 # not calaulated
                 
-                var_furthest = np.var(rev_signals[furthest_mic])
-                alpha = np.exp(-2 * np.pi * args.noise_fc  / fs) # Calculate filter coefficient (pole location)
+                # var_furthest = np.var(rev_signals[furthest_mic])
+                # alpha = np.exp(-2 * np.pi * args.noise_fc  / fs) # Calculate filter coefficient (pole location)
                 
-                g = np.sqrt(10 ** (-snr / 10) * var_furthest)
-                noise = g * np.random.randn(mics_num, len(s))
-                noise = lfilter([1], np.array([1, -alpha]), noise, axis=-1)  # Low-pass filter the noise at fcutoff = (fs / (2 * np.pi)) * np.arccos(pole)
+                # g = np.sqrt(10 ** (-snr / 10) * var_furthest)
+                # noise = g * np.random.randn(mics_num, len(s))
+                # noise = lfilter([1], np.array([1, -alpha]), noise, axis=-1)  # Low-pass filter the noise at fcutoff = (fs / (2 * np.pi)) * np.arccos(pole)
 
-                rev_signals += noise
+                rev_signals = add_ar1_noise_to_signals(rev_signals, decay=0.9, snr_db=args.snr)
+
+                # rev_signals += noise
                 rev_signals = rev_signals / np.max(np.abs(rev_signals)) / 1.1  # Normalize
 
                 # Create a directory in which wavs will be saved
@@ -103,13 +119,13 @@ if __name__ == '__main__':
         description="Simulates and adds reverberation to a clean sound sample."
     )
     # general parameters
-    parser.add_argument("--split", choices=['train', 'val', 'test'], default='test', help="Generate training, val or test")
+    parser.add_argument("--split", choices=['train', 'val', 'test'], default='train', help="Generate training, val or test")
     parser.add_argument("--dataset", choices=['None', 'add_noise'], default='add_noise')
     parser.add_argument("--clean_speech_dir", type=str, default='../dataset_folder', help="Directory where the clean speech files are stored")
     parser.add_argument("--output_folder", type=str, default='', help="Directory where the ourput is saved")
 
     # scene parameters
-    parser.add_argument("--num_scenes", type=int, default=2, help="Number of scenarios to generate")
+    parser.add_argument("--num_scenes", type=int, default=20, help="Number of scenarios to generate")
     parser.add_argument("--mics_num", type=int, default=5, help="Number of microphones in the array")
     parser.add_argument("--mic_min_spacing", type=float, default=0.03, help="Minimum spacing between microphones")
     parser.add_argument("--mic_max_spacing", type=float, default=0.08, help="Maximum spacing between microphones")
@@ -123,8 +139,10 @@ if __name__ == '__main__':
     parser.add_argument("--room_len_z_max", type=float, default=2.9, help="Maximum length of the room in z-direction")
 
     parser.add_argument("--T60_options", type=float, nargs='+', default=[0.2, 0.4, 0.6, 0.8], help="List of T60 values for the room")
-    parser.add_argument("--snr", type=float, default=25, help="added noise snr value [dB]")
+    parser.add_argument("--snr", type=float, default=30, help="added noise snr value [dB]")
     parser.add_argument("--noise_fc", type=float, default=1000, help="cufoff lowpass freq for added noise [Hz]")
+    parser.add_argument("--noise_AR_decay", type=float, default=0.9, help="cufoff lowpass freq for added noise [Hz]")
+    parser.add_argument("--minimum_sentence_len", type=float, default=6, help="minimum required for sentence length in seconds")
 
     parser.add_argument("--source_min_height", type=float, default=1.5, help="Minimum height of the source")
     parser.add_argument("--source_max_height", type=float, default=2, help="Maximum height of the source")
