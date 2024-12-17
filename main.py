@@ -65,7 +65,6 @@ def generate_rev_speech(args):
             print('Processing Scene %d/%d. Speaker: %s, wav file processed: %s, wav file number: %d.' % (
                 scene_idx + 1, num_scenes, selected_speaker, os.path.basename(curr_wav_file_path), index + 1))
 
-
             # Generate RIR for the current source position for all mic positons
             # Basically- this RIR's can be generated for src_pos together- but lfilter cant filter all 
             # atm we keep this inside src_pos loop 
@@ -119,13 +118,13 @@ if __name__ == '__main__':
         description="Simulates and adds reverberation to a clean sound sample."
     )
     # general parameters
-    parser.add_argument("--split", choices=['train', 'val', 'test'], default='train', help="Generate training, val or test")
+    parser.add_argument("--split", choices=['train', 'val', 'test'], default='test', help="Generate training, val or test")
     parser.add_argument("--dataset", choices=['None', 'add_noise'], default='add_noise')
     parser.add_argument("--clean_speech_dir", type=str, default='../dataset_folder', help="Directory where the clean speech files are stored")
     parser.add_argument("--output_folder", type=str, default='', help="Directory where the ourput is saved")
 
     # scene parameters
-    parser.add_argument("--num_scenes", type=int, default=20, help="Number of scenarios to generate")
+    parser.add_argument("--num_scenes", type=int, default=30, help="Number of scenarios to generate")
     parser.add_argument("--mics_num", type=int, default=5, help="Number of microphones in the array")
     parser.add_argument("--mic_min_spacing", type=float, default=0.03, help="Minimum spacing between microphones")
     parser.add_argument("--mic_max_spacing", type=float, default=0.08, help="Maximum spacing between microphones")
@@ -142,7 +141,7 @@ if __name__ == '__main__':
     parser.add_argument("--snr", type=float, default=30, help="added noise snr value [dB]")
     parser.add_argument("--noise_fc", type=float, default=1000, help="cufoff lowpass freq for added noise [Hz]")
     parser.add_argument("--noise_AR_decay", type=float, default=0.9, help="cufoff lowpass freq for added noise [Hz]")
-    parser.add_argument("--minimum_sentence_len", type=float, default=6, help="minimum required for sentence length in seconds")
+    parser.add_argument("--minimum_sentence_len", type=float, default=8, help="minimum required for sentence length in seconds")
 
     parser.add_argument("--source_min_height", type=float, default=1.5, help="Minimum height of the source")
     parser.add_argument("--source_max_height", type=float, default=2, help="Maximum height of the source")
