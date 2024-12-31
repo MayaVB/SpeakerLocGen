@@ -5,7 +5,7 @@ import random
 import numpy as np
 import plotly.graph_objects as go
 import matplotlib.pyplot as plt
-
+epsilon = 1e-5  # A small constant
 
 def select_random_speaker(speakers_dir_clean):
     """
@@ -55,8 +55,8 @@ def calculate_doa(src_pos, mic_pos):
     mic_pos = np.array(mic_pos)
     array_center = np.mean(mic_pos, axis=0)  # Calculate the center of the microphone array
     
-    # Define the array vector as the vector from the first to the last microphone position
-    array_vector = mic_pos[-1] - mic_pos[0]
+    # Define the array vector as the vector from the first to the "middel" microphone position
+    array_vector = mic_pos[-1] - mic_pos[2]
     array_vector = array_vector / np.linalg.norm(array_vector)  # Normalize the array vector
     
     # Vector from array center to source
@@ -89,6 +89,8 @@ def generate_scenes(args):
     :param args: Input arguments from a parser that contains the room and array configuration parameters.
     :return: A list of dictionaries containing source, microphone, and room information.
     """
+    start_doa_grid = 10
+    end_doa_grid = 170
     # Microphone array parameters
     mics_num = args.mics_num                 # Number of microphones in the array
     mic_min_spacing = args.mic_min_spacing   # Minimum spacing between microphones
@@ -145,7 +147,7 @@ def generate_scenes(args):
         mics_pos_arr = mics_pos_arr.T  # Transpose for easier calculations later
 
         # Randomize the orientation of the microphone array by applying a rotation
-        rotation_angle = np.random.uniform(0.001, np.pi)  # Random rotation angle between 0 and π
+        rotation_angle = np.deg2rad(np.round(np.random.uniform(0, 180)))  # Random rotation angle between 0 and π
         rotation_matrix = np.array([
             [np.cos(rotation_angle), -np.sin(rotation_angle), 0],
             [np.sin(rotation_angle),  np.cos(rotation_angle), 0],
@@ -162,8 +164,7 @@ def generate_scenes(args):
         mic_array_center = np.mean(mics_pos_agg, axis=0)
 
         # Generate source positions around the microphone array within a defined radial range
-        eps = sys.float_info.epsilon  # Smallest possible float value for numerical stability
-        src_angle = np.radians(np.arange(0.001, 180, DOA_grid_lag) + np.degrees(rotation_angle))  # Calculate angles
+        src_angle = np.radians(np.arange(start_doa_grid, end_doa_grid, DOA_grid_lag) + np.degrees(rotation_angle))  # Calculate angles
         src_radius = np.random.uniform(source_min_radius, source_max_radius, size=len(src_angle))  # Random radii
 
         # Convert polar coordinates (angle, radius) to Cartesian coordinates (x, y)
@@ -189,8 +190,9 @@ def generate_scenes(args):
     critic_dist = critical_distance(np.prod(room_dim), T60)
 
     # Calculate Direction of Arrival (DOA) angles (azimuth and elevation)
-    az_DOA, el_DOA = calculate_doa(src_pos, np.array(mics_pos_agg))
-
+    # az_DOA, el_DOA = calculate_doa(src_pos, np.array(mics_pos_agg))
+    az_DOA = np.arange(start_doa_grid, end_doa_grid, DOA_grid_lag)
+    
     # Append all relevant information to the scene list
     src_mics_info.append({
         'room_dim': room_dim,          # Room dimensions (x, y, z)
