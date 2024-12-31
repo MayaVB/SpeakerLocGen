@@ -118,13 +118,13 @@ if __name__ == '__main__':
         description="Simulates and adds reverberation to a clean sound sample."
     )
     # general parameters
-    parser.add_argument("--split", choices=['train', 'val', 'test'], default='test', help="Generate training, val or test")
+    parser.add_argument("--split", choices=['train', 'val', 'test'], default='train', help="Generate training, val or test")
     parser.add_argument("--dataset", choices=['None', 'add_noise'], default='add_noise')
     parser.add_argument("--clean_speech_dir", type=str, default='../dataset_folder', help="Directory where the clean speech files are stored")
     parser.add_argument("--output_folder", type=str, default='', help="Directory where the ourput is saved")
 
     # scene parameters
-    parser.add_argument("--num_scenes", type=int, default=30, help="Number of scenarios to generate")
+    parser.add_argument("--num_scenes", type=int, default=20, help="Number of scenarios to generate")
     parser.add_argument("--mics_num", type=int, default=5, help="Number of microphones in the array")
     parser.add_argument("--mic_min_spacing", type=float, default=0.03, help="Minimum spacing between microphones")
     parser.add_argument("--mic_max_spacing", type=float, default=0.08, help="Maximum spacing between microphones")
@@ -137,7 +137,7 @@ if __name__ == '__main__':
     parser.add_argument("--room_len_z_min", type=float, default=2.3, help="Minimum length of the room in z-direction")
     parser.add_argument("--room_len_z_max", type=float, default=2.9, help="Maximum length of the room in z-direction")
 
-    parser.add_argument("--T60_options", type=float, nargs='+', default=[0.2, 0.4, 0.6, 0.8], help="List of T60 values for the room")
+    parser.add_argument("--T60_options", type=float, nargs='+', default=[0.2, 0,4, 0.6, 0.8], help="List of T60 values for the room [0.2, 0.4, 0.6, 0.8]")
     parser.add_argument("--snr", type=float, default=30, help="added noise snr value [dB]")
     parser.add_argument("--noise_fc", type=float, default=1000, help="cufoff lowpass freq for added noise [Hz]")
     parser.add_argument("--noise_AR_decay", type=float, default=0.9, help="cufoff lowpass freq for added noise [Hz]")
@@ -147,7 +147,7 @@ if __name__ == '__main__':
     parser.add_argument("--source_max_height", type=float, default=2, help="Maximum height of the source")
     parser.add_argument("--source_min_radius", type=float, default=1.5, help="Minimum radius for source localization")
     parser.add_argument("--source_max_radius", type=float, default=1.7, help="Maximum radius for source localization")
-    parser.add_argument("--DOA_grid_lag", type=float, default=5, help="Degrees for DOA grid lag")
+    parser.add_argument("--DOA_grid_lag", type=float, default=2, help="Degrees for DOA grid lag")
 
     parser.add_argument("--margin", type=float, default=0.5, help="Margin distance between the source/mics to the walls")  
     args = parser.parse_args()
