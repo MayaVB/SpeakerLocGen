@@ -50,7 +50,7 @@ def write_scene_to_file(scenes, file_name):
     with open (file_name, 'w') as f:
         for scene in scenes:
             f.write(f"Room size: {round_numbers(scene['room_dim'])}\n")
-            f.write(f"Reverberation time: {round(scene['RT60'])}\n")
+            f.write(f"Reverberation time: {(scene['RT60'])}\n")
             f.write(f"Critical distance: {round(scene['critic_dist'], 4)}\n")
             pos = round_numbers(scene['src_pos'][0])
             f.write(f"Source position: {pos}\n")
