@@ -5,6 +5,9 @@ import random
 import numpy as np
 import plotly.graph_objects as go
 import matplotlib.pyplot as plt
+from random import randrange, uniform
+from math import trunc, radians, degrees
+
 epsilon = 1e-5  # A small constant
 
 def select_random_speaker(speakers_dir_clean):
@@ -114,7 +117,8 @@ def generate_scenes(args):
     source_min_radius = args.source_min_radius   # Minimum radial distance from the microphone array
     source_max_radius = args.source_max_radius   # Maximum radial distance from the microphone array
     DOA_grid_lag = args.DOA_grid_lag             # Angle step for DOA grid calculation
-
+    offgrid_angle = args.offgrid_angle
+    
     # Minimum margin to ensure the microphones and source are not too close to room walls
     margin = args.margin
 
@@ -164,7 +168,12 @@ def generate_scenes(args):
         mic_array_center = np.mean(mics_pos_agg, axis=0)
 
         # Generate source positions around the microphone array within a defined radial range
-        src_angle = np.radians(np.arange(start_doa_grid, end_doa_grid, DOA_grid_lag) + np.degrees(rotation_angle))  # Calculate angles
+        if offgrid_angle:
+            src_angle = np.radians(np.arange(start_doa_grid, end_doa_grid, DOA_grid_lag) + [round(random.uniform(0, 5), 2) for _ in range(32)] + np.degrees(rotation_angle))  # Calculate angles
+            np.degrees(src_angle)
+        else:
+            src_angle = np.radians(np.arange(start_doa_grid, end_doa_grid, DOA_grid_lag) + np.degrees(rotation_angle))  # Calculate angles
+
         src_radius = np.random.uniform(source_min_radius, source_max_radius, size=len(src_angle))  # Random radii
 
         # Convert polar coordinates (angle, radius) to Cartesian coordinates (x, y)
@@ -190,8 +199,11 @@ def generate_scenes(args):
     critic_dist = critical_distance(np.prod(room_dim), T60)
 
     # Calculate Direction of Arrival (DOA) angles (azimuth and elevation)
-    # az_DOA, el_DOA = calculate_doa(src_pos, np.array(mics_pos_agg))
-    az_DOA = np.arange(start_doa_grid, end_doa_grid, DOA_grid_lag)
+    if offgrid_angle:
+        az_DOA, el_DOA = calculate_doa(src_pos, np.array(mics_pos_agg))
+    else:
+        az_DOA, el_DOA = calculate_doa(src_pos, np.array(mics_pos_agg))
+        az_DOA = np.arange(start_doa_grid, end_doa_grid, DOA_grid_lag)
     
     # Append all relevant information to the scene list
     src_mics_info.append({
