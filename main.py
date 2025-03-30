@@ -1,14 +1,16 @@
 from scipy.signal import lfilter
 import soundfile as sf
 import numpy as np
+from scipy.io import wavfile
 
 import argparse
 import os
 import random
 # from datetime import datetime, timedelta
+from gpuRIR import simulateTrajectory
+from rir_gen import generate_rirs
 
 from scene_gen import select_random_speaker, generate_scenes, plot_scene_interactive
-from rir_gen import generate_rirs
 from utils import save_wavs, write_scene_to_file, save_data_h5py
 from processing import add_ar1_noise_to_signals
 
@@ -22,7 +24,10 @@ def generate_rev_speech(args):
     num_scenes = args.num_scenes
     snr = args.snr
     
-    save_rev_speech_dir = os.path.join(args.output_folder, args.split)
+    if args.output_folder:
+        save_rev_speech_dir = os.path.join(args.split, args.output_folder)
+    else:
+        save_rev_speech_dir = args.split
     # if os.path.exists(save_rev_speech_dir):
         # os.remove(save_rev_speech_dir)
     
@@ -38,9 +43,10 @@ def generate_rev_speech(args):
         # plot an interactive scene plot for each scenarion
         plot_scene_interactive(scene, save_rev_speech_dir, scene_idx)
         
+        simulate_trj = True
+        
         # for index, wav_file in enumerate(wav_files):
         for index, _ in enumerate(scene['src_pos'][0]):
-            curr_src_pos = scene['src_pos'][:, index]
             curr_wav_file_path = random.choice(wav_files)
 
             if len(wav_files) < len(scene['src_pos'][0]):
@@ -68,15 +74,30 @@ def generate_rev_speech(args):
             # Generate RIR for the current source position for all mic positons
             # Basically- this RIR's can be generated for src_pos together- but lfilter cant filter all 
             # atm we keep this inside src_pos loop 
-            RIRs = generate_rirs(scene['room_dim'], curr_src_pos, scene['mic_pos'], scene['RT60'], fs)
+            RIRs = generate_rirs(scene['room_dim'], scene['src_pos'], index, scene['mic_pos'], scene['RT60'], fs, args.simulate_trj)
 
-            # Generate reverberant speech for each mic
-            rev_signals = np.zeros([mics_num, len(s)])
-            for j, rir in enumerate(RIRs[0]):
-                rev_signals[j] = lfilter(rir, 1, s)
+            if args.simulate_trj:
+                rev_signals = simulateTrajectory(s, RIRs)
+                rev_signals = rev_signals.T
+                # # Normalize output to avoid clipping
+                # max_val = np.max(np.abs(filtered_signal))
+                # if max_val > 0:
+                #     filtered_signal /= max_val
+                
+            else: 
+                # Generate reverberant speech for each mic
+                rev_signals = np.zeros([mics_num, len(s)])
+                for j, rir in enumerate(RIRs[0]):
+                    rev_signals[j] = lfilter(rir, 1, s)
                 
             # Normalize
             rev_signals = rev_signals / np.max(np.abs(rev_signals)) / 1.1  
+
+            # # Loop through each mic and save
+            # for mic in range(rev_signals.shape[1]):
+            #     filename = f"rev_signal_mic{mic}.wav"
+            #     wavfile.write(filename, fs, rev_signals[:, mic])
+            #     print(f"Saved: {filename}")
 
             # Add noise
             if args.dataset == 'add_noise':
@@ -99,15 +120,18 @@ def generate_rev_speech(args):
                 os.makedirs(speaker_wav_dir, exist_ok=True)
                 
             # Save data as wavs
-            save_wavs(rev_signals, 0, speaker_wav_dir, fs)
+            # save_wavs(rev_signals, 0, speaker_wav_dir, fs)
 
             # Save data as h5py file
             save_data_h5py(rev_signals, scene, scene_idx, index, save_rev_speech_dir)
-                        
+            
+            if args.simulate_trj:
+                break # for traj simulation we dont need to loop over src_pos the calculation is performed at "simulateTrajectory"
+               
         scene_agg.append(scene)
         
         # save scene info txt file
-        write_scene_to_file(scene_agg, os.path.join(save_rev_speech_dir, 'train_info.txt'))
+        write_scene_to_file(scene_agg, os.path.join(save_rev_speech_dir, 'dataset_info.txt'))
 
     return scene_agg
 
@@ -118,15 +142,15 @@ if __name__ == '__main__':
         description="Simulates and adds reverberation to a clean sound sample."
     )
     # general parameters
-    parser.add_argument("--split", choices=['train', 'val', 'test'], default='test', help="Generate training, val or test")
+    parser.add_argument("--split", choices=['train', 'val', 'test'], default='trj3', help="Generate training, val or test")
     parser.add_argument("--dataset", choices=['None', 'add_noise'], default='add_noise')
     parser.add_argument("--clean_speech_dir", type=str, default='../dataset_folder', help="Directory where the clean speech files are stored")
     parser.add_argument("--output_folder", type=str, default='', help="Directory where the ourput is saved")
 
     # scene parameters
-    parser.add_argument("--num_scenes", type=int, default=20, help="Number of scenarios to generate")
+    parser.add_argument("--num_scenes", type=int, default=1, help="Number of scenarios to generate")
     parser.add_argument("--mics_num", type=int, default=5, help="Number of microphones in the array")
-    parser.add_argument("--mic_min_spacing", type=float, default=0.03, help="Minimum spacing between microphones")
+    parser.add_argument("--mic_min_spacing", type=float, default=0.08, help="Minimum spacing between microphones")
     parser.add_argument("--mic_max_spacing", type=float, default=0.08, help="Maximum spacing between microphones")
     parser.add_argument("--mic_height", type=float, default=1.7, help="Height of the microphone array from the floor")
 
@@ -137,17 +161,19 @@ if __name__ == '__main__':
     parser.add_argument("--room_len_z_min", type=float, default=2.3, help="Minimum length of the room in z-direction")
     parser.add_argument("--room_len_z_max", type=float, default=2.9, help="Maximum length of the room in z-direction")
 
-    parser.add_argument("--T60_options", type=float, nargs='+', default=[0.2, 0.4, 0.6, 0.8], help="List of T60 values for the room [0.2, 0.4, 0.6, 0.8]")
-    parser.add_argument("--snr", type=float, default=30, help="added noise snr value [dB]")
+    parser.add_argument("--T60_options", type=float, nargs='+', default=[0.8], help="List of T60 values for the room [0.2, 0.4, 0.6, 0.8], [0.3, 0.5, 0.8]")
+    parser.add_argument("--snr", type=float, default=10, help="added noise snr value [dB]")
     parser.add_argument("--noise_fc", type=float, default=1000, help="cufoff lowpass freq for added noise [Hz]")
     parser.add_argument("--noise_AR_decay", type=float, default=0.9, help="cufoff lowpass freq for added noise [Hz]")
     parser.add_argument("--minimum_sentence_len", type=float, default=8, help="minimum required for sentence length in seconds")
 
-    parser.add_argument("--source_min_height", type=float, default=1.65, help="Minimum height of the source (1.5)")
-    parser.add_argument("--source_max_height", type=float, default=1.75, help="Maximum height of the source (2)")
+    parser.add_argument("--source_min_height", type=float, default=1.6, help="Minimum height of the source (1.5/1.65)")
+    parser.add_argument("--source_max_height", type=float, default=1.8, help="Maximum height of the source (2/1.75)")
     parser.add_argument("--source_min_radius", type=float, default=1.5, help="Minimum radius for source localization")
     parser.add_argument("--source_max_radius", type=float, default=1.7, help="Maximum radius for source localization")
     parser.add_argument("--DOA_grid_lag", type=float, default=5, help="Degrees for DOA grid lag")
+    parser.add_argument("--offgrid_angle", type=bool, default=False, help="generate off sampeling grid doas")
+    parser.add_argument("--simulate_trj", type=bool, default=True, help="simulate moving speaker")
 
     parser.add_argument("--margin", type=float, default=0.5, help="Margin distance between the source/mics to the walls")  
     args = parser.parse_args()
