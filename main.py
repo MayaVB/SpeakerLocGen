@@ -13,6 +13,12 @@ from rir_gen import generate_rirs
 from scene_gen import select_random_speaker, generate_scenes, plot_scene_interactive
 from utils import save_wavs, write_scene_to_file, save_data_h5py
 from processing import add_ar1_noise_to_signals
+from scene_gen import calculate_doa
+
+def interpolate_angles(start_deg, end_deg, num):
+    """Interpolate angles correctly over circular range [0, 360)."""
+    delta = (end_deg - start_deg + 180) % 360 - 180
+    return (start_deg + np.linspace(0, 1, num) * delta) % 360
 
 def generate_rev_speech(args):
     """
@@ -28,8 +34,6 @@ def generate_rev_speech(args):
         save_rev_speech_dir = os.path.join(args.split, args.output_folder)
     else:
         save_rev_speech_dir = args.split
-    # if os.path.exists(save_rev_speech_dir):
-        # os.remove(save_rev_speech_dir)
     
     # Generate reverberant speech files
     for scene_idx in range(num_scenes):
@@ -42,10 +46,7 @@ def generate_rev_speech(args):
         
         # plot an interactive scene plot for each scenarion
         plot_scene_interactive(scene, save_rev_speech_dir, scene_idx)
-        
-        simulate_trj = True
-        
-        # for index, wav_file in enumerate(wav_files):
+                
         for index, _ in enumerate(scene['src_pos'][0]):
             curr_wav_file_path = random.choice(wav_files)
 
@@ -84,15 +85,34 @@ def generate_rev_speech(args):
                 # if max_val > 0:
                 #     filtered_signal /= max_val
                 
+                # calculate trj DOA
+                src_pos_trj = np.array(scene['src_pos'])  # shape [3, N]
+                n_samples = rev_signals.shape[1]
+                n_rirs = src_pos_trj.shape[1]
+                samples_per_rir = n_samples // n_rirs
+                az_DOA = scene['DOA_az']  # assumed shape: [n_rirs]
+
+                doa_trj = np.zeros(n_samples)  # azimuth per sample
+
+                for i in range(n_rirs - 1):
+                    start = i * samples_per_rir
+                    end = (i + 1) * samples_per_rir
+                    doa_trj[start:end] = interpolate_angles(az_DOA[i], az_DOA[i + 1], end - start)
+
+                # Final segment — hold the last DOA
+                last_start = (n_rirs - 1) * samples_per_rir
+                doa_trj[last_start:] = az_DOA[-1]
+                scene['DOA_az_trj'] = doa_trj
+                
             else: 
                 # Generate reverberant speech for each mic
                 rev_signals = np.zeros([mics_num, len(s)])
                 for j, rir in enumerate(RIRs[0]):
                     rev_signals[j] = lfilter(rir, 1, s)
-                
+            
             # Normalize
             rev_signals = rev_signals / np.max(np.abs(rev_signals)) / 1.1  
-
+    
             # # Loop through each mic and save
             # for mic in range(rev_signals.shape[1]):
             #     filename = f"rev_signal_mic{mic}.wav"
@@ -120,7 +140,7 @@ def generate_rev_speech(args):
                 os.makedirs(speaker_wav_dir, exist_ok=True)
                 
             # Save data as wavs
-            # save_wavs(rev_signals, 0, speaker_wav_dir, fs)
+            save_wavs(rev_signals, 0, speaker_wav_dir, fs)
 
             # Save data as h5py file
             save_data_h5py(rev_signals, scene, scene_idx, index, save_rev_speech_dir)
@@ -142,9 +162,10 @@ if __name__ == '__main__':
         description="Simulates and adds reverberation to a clean sound sample."
     )
     # general parameters
-    parser.add_argument("--split", choices=['train', 'val', 'test'], default='trj3', help="Generate training, val or test")
+    parser.add_argument("--split", choices=['train', 'val', 'test'], default='trj_endfire_bounce_v2', help="Generate training, val or test")
     parser.add_argument("--dataset", choices=['None', 'add_noise'], default='add_noise')
     parser.add_argument("--clean_speech_dir", type=str, default='../dataset_folder', help="Directory where the clean speech files are stored")
+    # parser.add_argument("--clean_speech_dir", type=str, default='/dsi/gannot-lab1/datasets/sharon_db/wsj0/Train', help="Directory where the clean speech files are stored")
     parser.add_argument("--output_folder", type=str, default='', help="Directory where the ourput is saved")
 
     # scene parameters
@@ -174,6 +195,7 @@ if __name__ == '__main__':
     parser.add_argument("--DOA_grid_lag", type=float, default=5, help="Degrees for DOA grid lag")
     parser.add_argument("--offgrid_angle", type=bool, default=False, help="generate off sampeling grid doas")
     parser.add_argument("--simulate_trj", type=bool, default=True, help="simulate moving speaker")
+    parser.add_argument("--endfire_bounce", type=bool, default=True, help="simulate 'half circle' movment- endfire -> broadband - back to endfire")
 
     parser.add_argument("--margin", type=float, default=0.5, help="Margin distance between the source/mics to the walls")  
     args = parser.parse_args()

@@ -22,8 +22,10 @@ def save_data_h5py(rev_signals, scene, scene_idx, src_pos_index, speaker_out_dir
         grp.create_dataset(f'speaker_DOA_', data=scene['DOA_az'][src_pos_index])
         grp.create_dataset(f'reverberation_time_', data=scene['RT60'])
         grp.create_dataset(f'mic_positions', data=scene['mic_pos'])
-                
-        # Increment the dataset length
+        if 'DOA_az_trj' in scene:
+            grp.create_dataset(f'speaker_DOA_trj', data=scene['DOA_az_trj'])
+
+    # Increment the dataset length
         if 'data_len' in h5f.attrs:
             h5f.attrs['data_len'] += 1
         else:

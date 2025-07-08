@@ -94,6 +94,8 @@ def generate_scenes(args):
     """
     start_doa_grid = 10
     end_doa_grid = 170
+    endfire_bounce = args.endfire_bounce                 # Number of microphones in the array
+
     # Microphone array parameters
     mics_num = args.mics_num                 # Number of microphones in the array
     mic_min_spacing = args.mic_min_spacing   # Minimum spacing between microphones
@@ -168,9 +170,17 @@ def generate_scenes(args):
         mic_array_center = np.mean(mics_pos_agg, axis=0)
 
         # Generate source positions around the microphone array within a defined radial range
-        if offgrid_angle:
-            src_angle = np.radians(np.arange(start_doa_grid, end_doa_grid, DOA_grid_lag) + [round(random.uniform(0, 5), 2) for _ in range(32)] + np.degrees(rotation_angle))  # Calculate angles
-            np.degrees(src_angle)
+        if endfire_bounce:
+            n_points = 32
+            
+            angles_forward = np.arange(start_doa_grid, 90, DOA_grid_lag)
+            angles_back = angles_forward[::-1]
+            src_angle = np.radians(np.concatenate([angles_forward, angles_back]) + np.degrees(rotation_angle))
+            # np.degrees(src_angle)     
+             
+        elif offgrid_angle:
+            src_angle = np.radians(np.arange(start_doa_grid, end_doa_grid, DOA_grid_lag) + [round(random.uniform(0, DOA_grid_lag/2), 2) for _ in range(n_points)] + np.degrees(rotation_angle))  # Calculate angles
+            # np.degrees(src_angle)
         else:
             src_angle = np.radians(np.arange(start_doa_grid, end_doa_grid, DOA_grid_lag) + np.degrees(rotation_angle))  # Calculate angles
 
@@ -201,10 +211,12 @@ def generate_scenes(args):
     # Calculate Direction of Arrival (DOA) angles (azimuth and elevation)
     if offgrid_angle:
         az_DOA, el_DOA = calculate_doa(src_pos, np.array(mics_pos_agg))
-    else:
+    elif endfire_bounce:
         az_DOA, el_DOA = calculate_doa(src_pos, np.array(mics_pos_agg))
-        az_DOA = np.arange(start_doa_grid, end_doa_grid, DOA_grid_lag)
-    
+        az_DOA = az_DOA.astype(int) # truncate and make integer
+    else:
+        az_DOA = np.arange(start_doa_grid, end_doa_grid, DOA_grid_lag) # error we inserted and numerical make this not with proper gap
+   
     # Append all relevant information to the scene list
     src_mics_info.append({
         'room_dim': room_dim,          # Room dimensions (x, y, z)
