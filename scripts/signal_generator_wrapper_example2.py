@@ -3,6 +3,7 @@ import matlab.engine
 from scipy.io import wavfile
 import matplotlib.pyplot as plt
 from scipy.io.wavfile import write as wavwrite
+from mpl_toolkits.mplot3d import Axes3D
 
 # === 1. Load anechoic input signal ===
 wav_path = "LDC93S6A.wav"
@@ -10,9 +11,6 @@ fs, in_data = wavfile.read(wav_path)
 if in_data.ndim > 1:
     in_data = in_data[0, :]  # use only 1st channel if stereo
 
-# Take 4 seconds, duplicated to 2 channels like in MATLAB
-# in_data = in_data[:4 * fs]
-# in_data = np.concatenate([in_data, in_data])  # shape: (2N,)
 in_data = in_data.astype(np.float64) / np.max(np.abs(in_data))  # Normalize
 len_samples = len(in_data)
 
@@ -25,8 +23,7 @@ order = float(2)
 mtype = 'o'
 
 # Receiver positions
-rp = np.array([[1.5, 2.4, 3.0],
-               [1.5, 2.6, 3.0]])
+rp = np.array([[1.5, 2.4, 3.0], [1.5, 2.6, 3.0]])
 M = rp.shape[0]
 cp = np.mean(rp, axis=0)
 
@@ -36,7 +33,7 @@ sp = np.array([2.5, 0.5, 3.0])  # initial source position
 stop = np.array([2.5, 4.5, 3.0])  # linear movement
 
 sp_path = np.zeros((len_samples, 3))
-rp_path = np.zeros((len_samples, 3, M))
+# rp_path = np.zeros((len_samples, 3, M))
 
 for ii in range(0, len_samples, hop):
     end = min(ii + hop, len_samples)
@@ -44,8 +41,8 @@ for ii in range(0, len_samples, hop):
     new_sp = sp + frac * (stop - sp)
     sp_path[ii:end, :] = new_sp
 
-    for m in range(M):
-        rp_path[ii:end, :, m] = rp[m]
+    # for m in range(M):
+        # rp_path[ii:end, :, m] = rp[m]
 
 # === 4. Convert to MATLAB format ===
 eng = matlab.engine.start_matlab()
@@ -55,8 +52,6 @@ eng.addpath('/home/dsi/mayavb/Signal-Generator', nargout=0)
 # in_signal = matlab.double(in_data.tolist())  # shape (2, N)
 in_signal = matlab.double(in_data.reshape(1, -1).tolist())
 sp_path_mat = matlab.double(sp_path.tolist())
-# rp_path_mat = matlab.double(rp_path.tolist())
-rp_path_mat = matlab.double(rp_path.reshape(len_samples, 3 * M).tolist())
 
 fixed_position = np.array([[1.5, 2.5-0.1, 3], [1.5, 2.5+0.1, 3]])  # Example positions for two mics
 r_path = np.tile(fixed_position.T, (len_samples, 1, 1))  # shape (N, 3, M)
@@ -107,3 +102,33 @@ plt.close()
 
 # === 8. Quit MATLAB ===
 eng.quit()
+
+
+
+# === 9. Plot 3D room with speaker path and mic positions ===
+from mpl_toolkits.mplot3d import Axes3D
+
+fig = plt.figure(figsize=(8, 6))
+ax = fig.add_subplot(111, projection='3d')
+
+# Plot room boundaries
+ax.set_xlim([0, 4])
+ax.set_ylim([0, 5])
+ax.set_zlim([0, 6])
+
+# Plot speaker path
+ax.plot(sp_path[:, 0], sp_path[:, 1], sp_path[:, 2], color='red', label='Speaker Path', linewidth=2)
+
+# Plot microphones
+for m in range(M):
+    ax.scatter(fixed_position[m, 0], fixed_position[m, 1], fixed_position[m, 2], marker='o', s=100, label=f'Mic {m+1}')
+
+ax.set_xlabel('X [m]')
+ax.set_ylabel('Y [m]')
+ax.set_zlabel('Z [m]')
+ax.set_title('Room with Speaker and Microphones')
+ax.legend()
+ax.grid(True)
+plt.tight_layout()
+plt.savefig("room_plot.png", dpi=300, bbox_inches='tight')
+plt.close()
