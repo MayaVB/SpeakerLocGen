@@ -162,7 +162,7 @@ if __name__ == '__main__':
         description="Simulates and adds reverberation to a clean sound sample."
     )
     # general parameters
-    parser.add_argument("--split", choices=['train', 'val', 'test'], default='trj_endfire_bounce_v2', help="Generate training, val or test")
+    parser.add_argument("--split", choices=['train', 'val', 'test'], default='temp', help="Generate training, val or test")
     parser.add_argument("--dataset", choices=['None', 'add_noise'], default='add_noise')
     parser.add_argument("--clean_speech_dir", type=str, default='../dataset_folder', help="Directory where the clean speech files are stored")
     # parser.add_argument("--clean_speech_dir", type=str, default='/dsi/gannot-lab1/datasets/sharon_db/wsj0/Train', help="Directory where the clean speech files are stored")
