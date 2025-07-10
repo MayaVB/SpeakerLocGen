@@ -2,11 +2,20 @@
 __pycache__/
 *.py[cod]
 *$py.class
+*.wav
 
 # data and plots folder
 train/
 test/
+test_offGrid/
+calib/
 data/
+trj_endfire_bounce/
+trj_endfire_bounce_v2/
+trj_endfire_bounce_v2/
+trj1/
+trj2/
+trj3/
 
 # C extensions
 *.so
