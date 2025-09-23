@@ -5,6 +5,7 @@ __pycache__/
 *.wav
 
 # data and plots folder
+data/
 train/
 test/
 test_offGrid/
