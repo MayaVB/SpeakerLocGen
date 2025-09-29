@@ -6,8 +6,7 @@ import argparse
 import os
 import random
 
-from scene_gen import select_random_speaker, generate_scenes, generate_rirs_pyroom, plot_scene_interactive
-from scene_gen import plot_scene_interactive, calculate_doa
+from scene_gen import select_random_speaker, generate_scenes, plot_scene_interactive, calculate_doa
 
 from utils import save_wavs, write_scene_to_file, save_data_h5py
 from utils import get_trj_DOA, interpolate_angles, inject_pink_noise_bursts
@@ -117,20 +116,16 @@ def inject_directional_noise_bursts(
             fs=fs,
             simulate_trj=False
         )
-        burst_mono = _make_noise_burst(T, fs)
+        # Generate burst exactly the needed length L
+        burst_mono = _make_noise_burst(L, fs)
 
         # Convolve into each mic channel
         # RIRs[0] is list of length M, each: rir[k]
         burst_mics = np.zeros((M, L), dtype=np.float32)
         for m, rir in enumerate(RIRs[0]):
             y = lfilter(rir.astype(np.float32), 1.0, burst_mono)
-            # keep same window length
-            if y.shape[0] < L:
-                pad = np.zeros(L, dtype=np.float32)
-                pad[:y.shape[0]] = y
-                y = pad
-            else:
-                y = y[:L]
+            # Truncate to exactly L samples (no padding needed since input is L)
+            y = y[:L]
             # Normalize per-mic so combined RMS is stable before SNR scaling
             burst_mics[m] = y
 
@@ -188,10 +183,13 @@ def build_three_phase_envelope(n_samples, fs, quiet_start_s, quiet_duration_s, r
     # Past quiet: stays at 1.0
     return env
 
-def build_paths_from_scene(s, fs, scene, fps, simulate_sinus=False):
+def build_paths_from_scene(s, fs, scene, fps):
     """
-    Returns sp_path [T,3], rp_path [T,3,M] using the scene's arc (scene['src_pos'])
-    or a smooth sinus DOA if simulate_sinus=True.
+    Build source and receiver paths for trajectory simulation.
+    Returns sp_path [T,3], rp_path [T,3,M] using the scene's arc (scene['src_pos']).
+
+    Note: sp_path and rp_path are also used in matlab_sg_wrapper.py and
+    signal_generator_python_final/run_example.py but serve the same purpose.
     """
     T = len(s)
     hop = max(1, int(round(fs / float(fps))))
@@ -204,49 +202,27 @@ def build_paths_from_scene(s, fs, scene, fps, simulate_sinus=False):
     for m in range(M):
         rp_path[:, :, m] = mic_pos[m]  # broadcast constant mic position
 
-    # Source path
+    # Source path - walk the existing arc defined by the discrete grid src_pos[:, k]
     sp_path = np.zeros((T, 3), dtype=np.float32)
-
-    if simulate_sinus:
-        # Smooth circular-ish arc around room center with constant radius
-        room_cx, room_cy, room_cz = np.array(scene['room_dim']) / 2.0
-        # keep original radius: distance from first src to array center
-        array_center = np.mean(mic_pos, axis=0)
-        radius = np.linalg.norm(src_pos[:, 0] - array_center)
-        center_deg, amp_deg = 60.0, 20.0
-
-        # generate per-hop angle; fill chunks to avoid drift on last partial hop
+    N = src_pos.shape[1]
+    if N < 2:
+        sp_path[:] = src_pos[:, 0]
+    else:
+        # step across the arc every 'hop' samples; linear interp between arc points
+        k = 0
         for i in range(0, T, hop):
             j = min(i + hop, T)
-            phase = (i / max(1, T - 1)) * 2 * np.pi
-            theta = np.deg2rad(center_deg) + np.deg2rad(amp_deg) * np.sin(phase)
-            sp = np.array([
-                room_cx + radius * np.cos(theta),
-                room_cy,
-                room_cz + radius * np.sin(theta)
-            ], dtype=np.float32)
-            sp_path[i:j] = sp
-    else:
-        # Walk the existing arc defined by the discrete grid src_pos[:, k]
-        N = src_pos.shape[1]
-        if N < 2:
-            sp_path[:] = src_pos[:, 0]
-        else:
-            # step across the arc every 'hop' samples; linear interp between arc points
-            k = 0
-            for i in range(0, T, hop):
-                j = min(i + hop, T)
-                k_next = min(k + 1, N - 1)
-                # alpha inside segment based on i across total time
-                seg_alpha = (i / max(1, T - 1))
-                # map seg_alpha to progress along [0..N-1]
-                posf = seg_alpha * (N - 1)
-                k_floor = int(np.floor(posf))
-                k_ceil = min(k_floor + 1, N - 1)
-                w = posf - k_floor
-                sp = (1 - w) * src_pos[:, k_floor] + w * src_pos[:, k_ceil]
-                sp_path[i:j] = sp.astype(np.float32)
-                k = k_next
+            k_next = min(k + 1, N - 1)
+            # alpha inside segment based on i across total time
+            seg_alpha = (i / max(1, T - 1))
+            # map seg_alpha to progress along [0..N-1]
+            posf = seg_alpha * (N - 1)
+            k_floor = int(np.floor(posf))
+            k_ceil = min(k_floor + 1, N - 1)
+            w = posf - k_floor
+            sp = (1 - w) * src_pos[:, k_floor] + w * src_pos[:, k_ceil]
+            sp_path[i:j] = sp.astype(np.float32)
+            k = k_next
 
     return sp_path, rp_path
 
@@ -257,6 +233,7 @@ def generate_rev_speech(args):
     :return: scene_agg: scence list of dict containing info about the scenario generated
     """
     scene_agg = []
+    sentence_durations = []  # Store sentence durations for speed calculation
     clean_speech_dir = args.clean_speech_dir
     num_scenes = args.num_scenes
     snr = args.snr
@@ -283,7 +260,7 @@ def generate_rev_speech(args):
             curr_wav_file_path = random.choice(wav_files)
 
             if len(wav_files) < len(scene['src_pos'][0]):
-                raise Exception("speaker wav files are lower then requested speaker location- not enough files!") 
+                raise Exception("speaker wav files are lower than requested speaker location- not enough files!") 
 
             # check wav length
             s, fs = sf.read(curr_wav_file_path) 
@@ -295,11 +272,15 @@ def generate_rev_speech(args):
             while not wav_verified:
 
                 # Read a clean file
-                s, fs = sf.read(curr_wav_file_path)  
+                s, fs = sf.read(curr_wav_file_path)
                 if len(s)/fs < args.minimum_sentence_len or len(s)/fs > args.maximum_sentence_len:
                     curr_wav_file_path = random.choice(wav_files)
                 else:
                     wav_verified = True
+
+            # Store sentence duration for speed calculation
+            sentence_duration = len(s) / fs
+            sentence_durations.append(sentence_duration)
 
             print('Processing Scene %d/%d. Speaker: %s, wav file processed: %s, wav file number: %d.' % (
                 scene_idx + 1, num_scenes, selected_speaker, os.path.basename(curr_wav_file_path), index + 1))
@@ -325,25 +306,38 @@ def generate_rev_speech(args):
 
             elif simulate_cpp_trj:
 
+                # Optionally reduce trajectory resolution for performance
+                if args.fast_mode:
+                    reduced_fps = min(args.fps, 50)  # Limit to 50 Hz for performance in fast mode
+                    print(f"Fast mode: reducing trajectory fps from {args.fps} to {reduced_fps}")
+                    order=1
+                else:
+                    reduced_fps = args.fps
+                    order=2
+
                 sp_path, rp_path = build_paths_from_scene(
-                    s=s, fs=fs, scene=scene, fps=args.fps, simulate_sinus=args.simulate_sinus
+                    s=s, fs=fs, scene=scene, fps=reduced_fps
                 )
 
                 # Room & RIR settings
                 L = scene['room_dim']               # [Lx, Ly, Lz]
                 beta = [float(scene['RT60'])]       # reverberation time list
-                nsamples = int(max(1, round(0.8 * fs * scene['RT60'])))  # consistent with your pyroom cap
-                order = 2                           # reflection order (tweak if you like)
+                Tmax = scene['RT60'] * 0.8  # Time to stop the simulation [s] - consistent with generate_rirs
+                nsamples = int(max(1, round(Tmax * fs)))
 
-                # Run generator
-                print(f"I am inside section of signalGenerator pythonic final")
+                # Convert data for SignalGenerator
+                input_signal_list = list(s.astype(float))
+                rp_path_list = rp_path.tolist()
+                sp_path_list = sp_path.tolist()
+
+                print("Running SignalGenerator...")
                 gen = SignalGenerator()
                 result = gen.generate(
-                    input_signal=list(s.astype(float)),
+                    input_signal=input_signal_list,
                     c=340.0,
                     fs=int(fs),
-                    r_path=rp_path.tolist(),        # [T, 3, M]
-                    s_path=sp_path.tolist(),        # [T, 3]
+                    r_path=rp_path_list,        # [T, 3, M]
+                    s_path=sp_path_list,        # [T, 3]
                     L=L,
                     beta_or_tr=beta,
                     nsamples=nsamples,
@@ -351,7 +345,6 @@ def generate_rev_speech(args):
                     order=order,
                     hp_filter=False
                 )
-                print(f"finished signalGenerator pythonic final")
 
                 # Pack to our expected shape [M, T]
                 rev_signals = np.asarray(result.output, dtype=np.float32)  # list[M][T]
@@ -372,7 +365,7 @@ def generate_rev_speech(args):
 
 
                 # Optional: compute DOA trajectory for bookkeeping/labels
-                scene['DOA_az_trj'] = get_trj_DOA(scene, rev_signals.T)    # expects [T, M]? flip if needed
+                scene['DOA_az_trj'] = get_trj_DOA(scene, rev_signals)    # expects [M, T]
                 
             else: 
                 from rir_gen import generate_rirs
@@ -432,7 +425,8 @@ def generate_rev_speech(args):
         scene_agg.append(scene)
         
         # save scene info txt file
-        write_scene_to_file(scene_agg, os.path.join(save_rev_speech_dir, 'dataset_info.txt'))
+        avg_sentence_duration = np.mean(sentence_durations) if sentence_durations else None
+        write_scene_to_file(scene_agg, os.path.join(save_rev_speech_dir, 'dataset_info.txt'), avg_sentence_duration)
 
     return scene_agg
 
@@ -445,7 +439,7 @@ if __name__ == '__main__':
     # general parameters
     # parser.add_argument("--split", choices=['train', 'val', 'test'], default='endfire_boreside_cp', help="Generate training, val or test")
     # parser.add_argument("--split", choices=['train', 'val', 'test'], default='simulate_quiet_profile', help="Generate training, val or test")
-    parser.add_argument("--split", choices=['train', 'val', 'test'], default='data/test_GT', help="Generate training, val or test")
+    parser.add_argument("--split", choices=['train', 'val', 'test'], default='data2/revision_test', help="Generate training, val or test")
     parser.add_argument("--dataset", choices=['None', 'add_noise'], default='add_noise')
     parser.add_argument("--clean_speech_dir", type=str, default='../dataset_folder', help="Directory where the clean speech files are stored")
     # parser.add_argument("--clean_speech_dir", type=str, default='/dsi/gannot-lab1/datasets/sharon_db/wsj0/Train', help="Directory where the clean speech files are stored")
@@ -470,7 +464,7 @@ if __name__ == '__main__':
     parser.add_argument("--noise_fc", type=float, default=1000, help="cufoff lowpass freq for added noise [Hz]")
     parser.add_argument("--noise_AR_decay", type=float, default=0.6, help="cufoff lowpass freq for added noise [Hz]")
     parser.add_argument("--minimum_sentence_len", type=float, default=4, help="default = 8 minimm required for sentence length in seconds")
-    parser.add_argument("--maximum_sentence_len", type=float, default=6, help="max required for sentence length in seconds")
+    parser.add_argument("--maximum_sentence_len", type=float, default=3, help="max required for sentence length in seconds")
 
     parser.add_argument("--source_min_height", type=float, default=1.6, help="Minimum height of the source (1.5/1.65)")
     parser.add_argument("--source_max_height", type=float, default=1.8, help="Maximum height of the source (2/1.75)")
@@ -484,7 +478,6 @@ if __name__ == '__main__':
     parser.add_argument("--endfire_bounce", type=bool, default=False, help="simulate 'half circle' movment- endfire -> broadband - back to endfire")
     parser.add_argument("--simulate_cpp_trj", type=bool, default=True, help="activate python wrapper for signal generator")
     
-    parser.add_argument("--simulate_sinus", type=bool, default=False, help="simulate sinus like trj- filter win UNET?")    
     parser.add_argument("--fps", type=float, default=125, help="frames per second: fs/(framesize*(1-overlap))")
     parser.add_argument("--inject_burst_noise", type=bool, default=False, help="frames per second: fs/(framesize*(1-overlap))")
 
@@ -501,6 +494,9 @@ if __name__ == '__main__':
     parser.add_argument("--dir_noise_min_ms", type=int, default=300, help="Min burst duration in milliseconds")
     parser.add_argument("--dir_noise_max_ms", type=int, default=500, help="Max burst duration in milliseconds")
     parser.add_argument("--dir_noise_snr_db", type=float, default=0.0, help="Target SNR (dB) of noise vs signal over the burst window; 0 = equal power, negative = louder noise")
+
+    # Performance optimization flags
+    parser.add_argument("--fast_mode", type=bool, default=False, help="Enable performance optimizations (reduced resolution, shorter RIRs, lower reflection order)")
 
     parser.add_argument("--margin", type=float, default=0.5, help="Margin distance between the source/mics to the walls")  
     args = parser.parse_args()
