@@ -46,11 +46,16 @@ def save_data_h5py(rev_signals, scene, scene_idx, src_pos_index, speaker_out_dir
         group_name = f"sceneIndx_{scene_idx}_roomDim_{scene['room_dim']}_rt60_{scene['RT60']}_srcPosInd_{src_pos_index}"
         grp = h5f.create_group(group_name)
         grp.create_dataset(f'signals_', data=rev_signals)
-        grp.create_dataset(f'speaker_DOA_', data=scene['DOA_az'][src_pos_index])
+
+        # For trajectory scenarios, leave speaker_DOA_ empty since DOA changes over time
+        if 'DOA_az_trj' in scene:
+            grp.create_dataset(f'speaker_DOA_', data=np.array([]))  # Empty array for trajectory
+            grp.create_dataset(f'speaker_DOA_trj', data=scene['DOA_az_trj'])
+        else:
+            grp.create_dataset(f'speaker_DOA_', data=scene['DOA_az'][src_pos_index])
+
         grp.create_dataset(f'reverberation_time_', data=scene['RT60'])
         grp.create_dataset(f'mic_positions', data=scene['mic_pos'])
-        if 'DOA_az_trj' in scene:
-            grp.create_dataset(f'speaker_DOA_trj', data=scene['DOA_az_trj'])
 
     # Increment the dataset length
         if 'data_len' in h5f.attrs:
@@ -70,11 +75,36 @@ def round_numbers(list_in):
     return list(map(lambda x: round(x, 4), list_in))
 
 
-def write_scene_to_file(scenes, file_name):
+def calculate_speaker_speed(scene, sentence_duration):
+    """
+    Calculate speaker speed from trajectory positions and sentence duration
+    :param scene: scene parameters containing src_pos trajectory
+    :param sentence_duration: duration of sentence in seconds
+    :return: speed in m/s
+    """
+    src_pos = scene['src_pos']  # [3, N] array of positions
+    if src_pos.shape[1] < 2:
+        return 0.0  # No movement for single position
+
+    # Calculate total distance along trajectory
+    total_distance = 0.0
+    for i in range(src_pos.shape[1] - 1):
+        pos1 = src_pos[:, i]
+        pos2 = src_pos[:, i + 1]
+        distance = np.linalg.norm(pos2 - pos1)
+        total_distance += distance
+
+    # Speed = total distance / time
+    speed = total_distance / sentence_duration if sentence_duration > 0 else 0.0
+    return speed
+
+
+def write_scene_to_file(scenes, file_name, sentence_duration=None):
     """
     print scene info to a txt file
     :param scenes: list of dict containing info about the scenario generated
     :param file_name: file name to save the info
+    :param sentence_duration: optional sentence duration in seconds for speed calculation
     """
     with open (file_name, 'w') as f:
         for scene in scenes:
@@ -83,10 +113,16 @@ def write_scene_to_file(scenes, file_name):
             f.write(f"Critical distance: {round(scene['critic_dist'], 4)}\n")
             pos = round_numbers(scene['src_pos'][0])
             f.write(f"Source position: {pos}\n")
+
+            # Add speaker speed if sentence duration is provided
+            if sentence_duration is not None:
+                speed = calculate_speaker_speed(scene, sentence_duration)
+                f.write(f"Speaker speed: {round(speed, 4)} m/s\n")
+
             mics_num = len(scene['mic_pos'])
             for i in range(mics_num):
                 pos = round_numbers(scene['mic_pos'][i])
-                dist = round_numbers(scene['dists'][i])
+                dist = round_numbers(scene['dists'][:, i])
                 f.write(f"Mic{i} pos\t: {pos}, dist:{dist}\n")
             f.write('\n\n\n')
             f.flush()

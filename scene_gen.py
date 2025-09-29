@@ -4,9 +4,6 @@ import random
 import numpy as np
 import plotly.graph_objects as go
 import matplotlib.pyplot as plt
-from math import trunc, radians, degrees
-
-import numpy as np
 
 epsilon = 1e-5  # A small constant
 
@@ -21,72 +18,6 @@ def center_to_corner(pos, room_sz):
     """
     return pos + np.array(room_sz) / 2
 
-def generate_rirs_pyroom(room_sz, all_pos_src, index, pos_rcv, T60, fs, simulate_trj=False):
-    """
-    Generates Room Impulse Responses (RIRs) using pyroomacoustics for multiple source positions.
-
-    :param room_sz: Room dimensions [L, W, H]
-    :param all_pos_src: All source positions [3, num_sources] or [3, num_frames] if simulate_trj
-    :param index: Index to select a specific frame (when simulate_trj=False)
-    :param pos_rcv: Receiver positions [num_mics, 3]
-    :param T60: Reverberation time
-    :param fs: Sampling rate
-    :param simulate_trj: If True, simulate all positions in trajectory
-    :return: List of RIRs: rirs[mic][src]
-    """
-    import pyroomacoustics as pra
-    # Determine source positions
-    if simulate_trj:
-        pos_src = all_pos_src.T  # shape: (N_sources, 3)
-    else:
-        pos_src = all_pos_src[:, index].reshape(-1, 3)  # shape: (N_sources, 3)
-
-    # Shift positions from center-based to corner-based coordinates
-    pos_src_shifted = pos_src
-    pos_rcv_shifted = pos_rcv
-    
-    # print("pos_src min/max:", np.min(pos_src, axis=0), np.max(pos_src, axis=0))
-    # print("room size:", room_sz)
-    
-    # print("Orig source positions:\n", pos_src)
-    # print("Shifted source positions:\n", pos_src_shifted)
-    # print("Room size:", room_sz)
-
-    # reflection = pra.inverse_sabine(T60, room_sz)
-    # absorption = 1 - reflection
-    reflection, _ = pra.inverse_sabine(T60, room_sz)
-    absorption = 1 - reflection
-
-    room = pra.ShoeBox(
-        room_sz,
-        fs=fs,
-        materials=pra.Material(absorption),
-        max_order= 0,  # max_order= estimate_max_order(room_sz, T60) 30
-        ray_tracing=True,
-        air_absorption=True,
-    )
-
-    # Add source(s)
-    for src in pos_src_shifted:
-        room.add_source(src)
-
-    # Add microphone array (shape must be 2 x M)
-    room.add_microphone_array(np.array(pos_rcv_shifted).T)
-
-    # Compute RIRs
-    room.compute_rir()
-
-    # Enforce fixed RIR length
-    rir_len = int(fs * T60 * 0.8)
-    for m in range(len(room.rir)):
-        for s in range(len(room.rir[m])):
-            rir = room.rir[m][s]
-            if len(rir) > rir_len:
-                room.rir[m][s] = rir[:rir_len]
-            else:
-                room.rir[m][s] = np.pad(rir, (0, rir_len - len(rir)))
-
-    return room.rir  # rirs[mic][source]
 
 
 def select_random_speaker(speakers_dir_clean):
@@ -137,8 +68,8 @@ def calculate_doa(src_pos, mic_pos):
     mic_pos = np.array(mic_pos)
     array_center = np.mean(mic_pos, axis=0)  # Calculate the center of the microphone array
     
-    # Define the array vector as the vector from the first to the "middel" microphone position
-    array_vector = mic_pos[-1] - mic_pos[2]
+    # Define the array vector as the vector from the first to the last microphone position
+    array_vector = mic_pos[-1] - mic_pos[0]
     array_vector = array_vector / np.linalg.norm(array_vector)  # Normalize the array vector
     
     # Vector from array center to source
@@ -294,14 +225,12 @@ def generate_scenes(args):
     # Compute the critical distance based on room volume and T60
     critic_dist = critical_distance(np.prod(room_dim), T60)
 
-    # Calculate Direction of Arrival (DOA) angles (azimuth and elevation)
-    if offgrid_angle:
-        az_DOA, el_DOA = calculate_doa(src_pos, np.array(mics_pos_agg))
-    elif endfire_bounce:
-        az_DOA, el_DOA = calculate_doa(src_pos, np.array(mics_pos_agg))
-        az_DOA = az_DOA.astype(int) # truncate and make integer
-    else:
-        az_DOA = np.arange(start_doa_grid, end_doa_grid, DOA_grid_lag) # error we inserted and numerical make this not with proper gap
+    # Calculate Direction of Arrival (DOA) angles (azimuth and elevation) - always from geometry
+    az_DOA, el_DOA = calculate_doa(src_pos, np.array(mics_pos_agg))
+
+    # Apply specific processing based on scenario type
+    if endfire_bounce:
+        az_DOA = az_DOA.astype(int)  # truncate and make integer for endfire
    
     # Append all relevant information to the scene list
     src_mics_info.append({
