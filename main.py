@@ -19,6 +19,11 @@ import sys, pathlib
 sys.path.append(str(pathlib.Path(__file__).resolve().parent / "signal_generator_python_final"))
 from signal_generator import SignalGenerator
 
+def save_args_to_file(args, filepath):
+    with open(filepath, "a") as f:   # "a" = append so scene info still goes in
+        f.write("\n\n===== Command-line Arguments =====\n")
+        for k, v in vars(args).items():
+            f.write(f"{k}: {v}\n")
 
 def _sample_noise_source_position(scene, args):
     """
@@ -46,12 +51,35 @@ def _sample_noise_source_position(scene, args):
     z = float(np.clip(z, margin, Lz - margin))
     return np.array([x, y, z], dtype=np.float32)
 
+def _pink_noise(n, rng=np.random):
+    """
+    Approximate pink noise (1/f) via FFT shaping of white noise.
+    Uses 1/sqrt(k) amplitude tilt in the frequency domain (k = bin index).
+    """
+    x = rng.standard_normal(n).astype(np.float64)
+    X = np.fft.rfft(x)
 
-def _make_noise_burst(n_samples, fs):
+    k = np.arange(X.size, dtype=np.float64)
+    k[0] = 1.0  # avoid div-by-zero at DC
+    tilt = 1.0 / np.sqrt(k)
+
+    X *= tilt
+    y = np.fft.irfft(X, n=n).astype(np.float64)
+
+    # unit RMS
+    rms = np.sqrt(np.mean(y**2)) + 1e-12
+    return (y / rms).astype(np.float32)
+
+
+def _make_noise_burst(n_samples, fs, color="white"):
     """
-    Simple wideband (white) burst with short fades. You can swap to pink if you prefer.
+    Make a short noise burst (white or pink) with 10 ms cosine fades and unit RMS.
     """
-    burst = np.random.randn(n_samples).astype(np.float32)
+    if color == "pink":
+        burst = _pink_noise(n_samples)
+    else:
+        burst = np.random.randn(n_samples).astype(np.float32)
+
     # 10 ms cosine fade in/out
     fade_len = max(1, int(0.01 * fs))
     win = np.ones(n_samples, dtype=np.float32)
@@ -59,18 +87,21 @@ def _make_noise_burst(n_samples, fs):
     win[:fade_len] *= 0.5 * (1 - np.cos(t))
     win[-fade_len:] *= 0.5 * (1 - np.cos(t[::-1]))
     burst *= win
-    # normalize RMS ≈ 1
+
+    # unit RMS (re-normalize after windowing)
     rms = np.sqrt(np.mean(burst**2)) + 1e-12
     return burst / rms
 
 
 def inject_directional_noise_bursts(
     rev_signals, fs, scene,
-    duration_range=(0.3, 0.5),   # seconds
+    duration_range=(0.3, 0.5),
     num_bursts=3,
-    snr_db=0.0,                  # relative to current segment (across mics)
-    max_tries=50
+    snr_db=0.0,
+    max_tries=50,
+    color="white",        # <— new
 ):
+
     """
     Add num_bursts directional noise bursts by:
       1) Picking a random static noise source in the room;
@@ -108,16 +139,16 @@ def inject_directional_noise_bursts(
         # generate RIRs expects src_pos like scene['src_pos'][:, index]
         tmp_src_pos = np.stack([src], axis=1)  # [3,1]
         RIRs = generate_rirs(
-            room_dim=scene['room_dim'],
-            src_pos=tmp_src_pos,
+            room_sz=scene['room_dim'],
+            all_pos_src=tmp_src_pos,
             index=0,
-            mic_pos=scene['mic_pos'],
+            pos_rcv=scene['mic_pos'],
             T60=scene['RT60'],
             fs=fs,
             simulate_trj=False
         )
         # Generate burst exactly the needed length L
-        burst_mono = _make_noise_burst(L, fs)
+        burst_mono = _make_noise_burst(L, fs, color=color)
 
         # Convolve into each mic channel
         # RIRs[0] is list of length M, each: rir[k]
@@ -237,7 +268,7 @@ def generate_rev_speech(args):
     clean_speech_dir = args.clean_speech_dir
     num_scenes = args.num_scenes
     snr = args.snr
-    simulate_cpp_trj = args.simulate_cpp_trj
+    # simulate_cpp_trj = args.simulate_cpp_trj
     
     if args.output_folder:
         save_rev_speech_dir = os.path.join(args.split, args.output_folder)
@@ -246,7 +277,6 @@ def generate_rev_speech(args):
     
     # Generate reverberant speech files
     for scene_idx in range(num_scenes):
-        
         selected_speaker, wav_files = select_random_speaker(clean_speech_dir)
 
         # Generate a scene
@@ -286,25 +316,25 @@ def generate_rev_speech(args):
                 scene_idx + 1, num_scenes, selected_speaker, os.path.basename(curr_wav_file_path), index + 1))
 
             # Generate RIR for the current source position for all mic positons
-            if args.simulate_trj and not simulate_cpp_trj:
-                from gpuRIR import simulateTrajectory
-                from rir_gen import generate_rirs
+            if args.simulate_trj:
+                # from gpuRIR import simulateTrajectory
+                # from rir_gen import generate_rirs
                 
-                RIRs = generate_rirs(scene['room_dim'], scene['src_pos'], index, scene['mic_pos'], scene['RT60'], fs, args.simulate_trj)
+                # RIRs = generate_rirs(scene['room_dim'], scene['src_pos'], index, scene['mic_pos'], scene['RT60'], fs, args.simulate_trj)
 
-                # rev_signals = simulateTrajectory(s, RIRs)
-                # rev_signals = rev_signals.T
+                # # rev_signals = simulateTrajectory(s, RIRs)
+                # # rev_signals = rev_signals.T
+                # # scene['DOA_az_trj'] = get_trj_DOA(scene, rev_signals)
+                
+                # # >>> apply speaking envelope post-RIR <<<                
+                # rev_signals = simulateTrajectory(s, RIRs).T  # [M, T]
+                
+                # if args.simulate_quiet_profile:
+                #     env = build_three_phase_envelope(len(s), fs, args.quiet_start_s, args.quiet_duration_s, args.ramp_s, args.quiet_gain)
+                #     rev_signals = rev_signals * env[None, :]  # [M,T] *= [1,T]
                 # scene['DOA_az_trj'] = get_trj_DOA(scene, rev_signals)
-                
-                # >>> apply speaking envelope post-RIR <<<                
-                rev_signals = simulateTrajectory(s, RIRs).T  # [M, T]
-                
-                if args.simulate_quiet_profile:
-                    env = build_three_phase_envelope(len(s), fs, args.quiet_start_s, args.quiet_duration_s, args.ramp_s, args.quiet_gain)
-                    rev_signals = rev_signals * env[None, :]  # [M,T] *= [1,T]
-                scene['DOA_az_trj'] = get_trj_DOA(scene, rev_signals)
 
-            elif simulate_cpp_trj:
+            # elif simulate_cpp_trj:
 
                 # Optionally reduce trajectory resolution for performance
                 if args.fast_mode:
@@ -368,7 +398,7 @@ def generate_rev_speech(args):
                 scene['DOA_az_trj'] = get_trj_DOA(scene, rev_signals)    # expects [M, T]
                 
             else: 
-                from rir_gen import generate_rirs
+                
                 RIRs = generate_rirs(scene['room_dim'], scene['src_pos'], index, scene['mic_pos'], scene['RT60'], fs, args.simulate_trj)
 
                 # Generate reverberant speech for each mic
@@ -400,7 +430,8 @@ def generate_rev_speech(args):
                     scene=scene,
                     duration_range=(args.dir_noise_min_ms / 1000.0, args.dir_noise_max_ms / 1000.0),
                     num_bursts=args.dir_noise_num_bursts,
-                    snr_db=args.dir_noise_snr_db
+                    snr_db=args.dir_noise_snr_db,
+                    color=args.dir_noise_color,   # <— here
                 )
             
             # normalization- hurts the noise we add
@@ -427,6 +458,7 @@ def generate_rev_speech(args):
         # save scene info txt file
         avg_sentence_duration = np.mean(sentence_durations) if sentence_durations else None
         write_scene_to_file(scene_agg, os.path.join(save_rev_speech_dir, 'dataset_info.txt'), avg_sentence_duration)
+        save_args_to_file(args, os.path.join(save_rev_speech_dir, 'dataset_info.txt'))
 
     return scene_agg
 
@@ -439,14 +471,14 @@ if __name__ == '__main__':
     # general parameters
     # parser.add_argument("--split", choices=['train', 'val', 'test'], default='endfire_boreside_cp', help="Generate training, val or test")
     # parser.add_argument("--split", choices=['train', 'val', 'test'], default='simulate_quiet_profile', help="Generate training, val or test")
-    parser.add_argument("--split", choices=['train', 'val', 'test'], default='data2/revision_test', help="Generate training, val or test")
+    parser.add_argument("--split", type=str, default="data4test/test_dynamic_0.8rt_30scenes", help="Dataset split or custom folder name")
     parser.add_argument("--dataset", choices=['None', 'add_noise'], default='add_noise')
-    parser.add_argument("--clean_speech_dir", type=str, default='../dataset_folder', help="Directory where the clean speech files are stored")
-    # parser.add_argument("--clean_speech_dir", type=str, default='/dsi/gannot-lab1/datasets/sharon_db/wsj0/Train', help="Directory where the clean speech files are stored")
-    parser.add_argument("--output_folder", type=str, default='', help="Directory where the ourput is saved")
+    parser.add_argument("--clean_speech_dir", type=str, default='../dataset_folder/gannot-lab/gannot-lab1/datasets/sharon_db/wsj0/Train/', help="Directory where the clean speech files are stored")
+# /private/gannot-lab/gannot-lab1/datasets/sharon_db/wsj0/Train/
+    parser.add_argument("--output_folder", type=str, default='', help="Directory where the output is saved")
 
     # scene parameters
-    parser.add_argument("--num_scenes", type=int, default=1, help="Number of scenarios to generate")
+    parser.add_argument("--num_scenes", type=int, default=30, help="Number of scenarios to generate")
     parser.add_argument("--mics_num", type=int, default=5, help="Number of microphones in the array")
     parser.add_argument("--mic_min_spacing", type=float, default=0.08, help="Minimum spacing between microphones")
     parser.add_argument("--mic_max_spacing", type=float, default=0.08, help="Maximum spacing between microphones")
@@ -459,12 +491,13 @@ if __name__ == '__main__':
     parser.add_argument("--room_len_z_min", type=float, default=2.3, help="Minimum length of the room in z-direction")
     parser.add_argument("--room_len_z_max", type=float, default=2.9, help="Maximum length of the room in z-direction")
 
-    parser.add_argument("--T60_options", type=float, nargs='+', default=[0.3, 0.5, 0.8], help="List of T60 values for the room [0.2, 0.4, 0.6, 0.8], [0.3, 0.5, 0.8]")
+    # parser.add_argument("--T60_options", type=float, nargs='+', default=[0.3], help="List of T60 values for the room [0.2, 0.4, 0.6, 0.8], [0.3, 0.5, 0.8]")
+    parser.add_argument("--T60_options", type=float, nargs='+', choices=[0.2, 0.5, 0.8], default=[0.3, 0.5, 0.8], help="Choose one or more T60 values from [0.2, 0.3, 0.4, 0.5, 0.6, 0.8]")    
     parser.add_argument("--snr", type=float, default=20, help="added noise snr value [dB]")
     parser.add_argument("--noise_fc", type=float, default=1000, help="cufoff lowpass freq for added noise [Hz]")
     parser.add_argument("--noise_AR_decay", type=float, default=0.6, help="cufoff lowpass freq for added noise [Hz]")
-    parser.add_argument("--minimum_sentence_len", type=float, default=4, help="default = 8 minimm required for sentence length in seconds")
-    parser.add_argument("--maximum_sentence_len", type=float, default=3, help="max required for sentence length in seconds")
+    parser.add_argument("--minimum_sentence_len", type=float, default=8, help="default = 8 minimm required for sentence length in seconds was 3")
+    parser.add_argument("--maximum_sentence_len", type=float, default=9, help="max required for sentence length in seconds was 4")
 
     parser.add_argument("--source_min_height", type=float, default=1.6, help="Minimum height of the source (1.5/1.65)")
     parser.add_argument("--source_max_height", type=float, default=1.8, help="Maximum height of the source (2/1.75)")
@@ -472,31 +505,32 @@ if __name__ == '__main__':
     parser.add_argument("--source_max_radius", type=float, default=1.7, help="Maximum radius for source localization")
     parser.add_argument("--DOA_grid_lag", type=float, default=5, help="Degrees for DOA grid lag")
     
-    parser.add_argument("--offgrid_angle", type=bool, default=False, help="generate off sampeling grid doas")
-    
-    parser.add_argument("--simulate_trj", type=bool, default=True, help="simulate moving speaker")
-    parser.add_argument("--endfire_bounce", type=bool, default=False, help="simulate 'half circle' movment- endfire -> broadband - back to endfire")
-    parser.add_argument("--simulate_cpp_trj", type=bool, default=True, help="activate python wrapper for signal generator")
-    
+    # Performance optimization flags and trj
+    # parser.add_argument("--simulate_trj", type=bool, default=False, help="simulate moving speaker")
+    parser.add_argument("--simulate_trj", action="store_true", help="simulate moving speaker")
+    parser.add_argument("--endfire_bounce", type=bool, default=False, help="simulate 'half circle' movment- endfire -> broadband - back to endfire")    
     parser.add_argument("--fps", type=float, default=125, help="frames per second: fs/(framesize*(1-overlap))")
-    parser.add_argument("--inject_burst_noise", type=bool, default=False, help="frames per second: fs/(framesize*(1-overlap))")
+    parser.add_argument("--offgrid_angle", type=bool, default=False, help="generate off sampeling grid doas")
+    parser.add_argument("--fast_mode", type=bool, default=False, help="Enable performance optimizations (reduced resolution, shorter RIRs, lower reflection order)")
+    
+    # normal_quiet_normal trajectory parameters- note minimum_sentence_len and maximum_sentence_len default 4-6sec 
+    parser.add_argument("--inject_burst_noise", action="store_true", help="add burst noise")
 
     # normal_quiet_normal trajectory parameters- note minimum_sentence_len and maximum_sentence_len default 4-6sec 
-    parser.add_argument("--simulate_quiet_profile", type=bool, default=False, help="Activate 3-phase speaking profile (normal → quiet → back to normal)")
+    parser.add_argument("--simulate_quiet_profile", action="store_true", help="add burst noise")
+    # parser.add_argument("--simulate_quiet_profile", type=bool, default=True, help="Activate 3-phase speaking profile (normal → quiet → back to normal)")
     parser.add_argument("--quiet_start_s", type=float, default=1, help="Time (s) when quiet phase begins")
     parser.add_argument("--quiet_duration_s", type=float, default=2.0, help="Length (s) of the quiet phase (middle section)")
-    parser.add_argument("--ramp_s", type=float, default=0.4, help="Fade time (s) for smooth transitions in/out")
-    parser.add_argument("--quiet_gain", type=float, default=0.55, help="Gain during quiet phase (0-1)")
+    parser.add_argument("--ramp_s", type=float, default=0.8, help="Fade time (s) for smooth transitions in/out")
+    parser.add_argument("--quiet_gain", type=float, default=0.02, help="Gain during quiet phase (0-1)")
 
     # Directional noise bursts (static, RIR-based)
-    parser.add_argument("--inject_directional_noise", type=bool, default=False, help="Add short directional noise bursts convolved with RIRs")
+    parser.add_argument("--inject_directional_noise", action="store_true", help="Add short directional noise bursts convolved with RIRs")
+    parser.add_argument("--dir_noise_color", choices=["white", "pink"], default="pink", help="Spectrum of directional burst noise.")
     parser.add_argument("--dir_noise_num_bursts", type=int, default=5, help="How many directional bursts to inject")
     parser.add_argument("--dir_noise_min_ms", type=int, default=300, help="Min burst duration in milliseconds")
     parser.add_argument("--dir_noise_max_ms", type=int, default=500, help="Max burst duration in milliseconds")
     parser.add_argument("--dir_noise_snr_db", type=float, default=0.0, help="Target SNR (dB) of noise vs signal over the burst window; 0 = equal power, negative = louder noise")
-
-    # Performance optimization flags
-    parser.add_argument("--fast_mode", type=bool, default=False, help="Enable performance optimizations (reduced resolution, shorter RIRs, lower reflection order)")
 
     parser.add_argument("--margin", type=float, default=0.5, help="Margin distance between the source/mics to the walls")  
     args = parser.parse_args()

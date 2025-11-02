@@ -1,0 +1,5 @@
+python main.py --simulate_trj --simulate_quiet_profile
+
+python main.py --split test4paper/train_dynamic_0.2rt_50scenes --num_scenes 50 --simulate_trj --inject_directional_noise --T60_options 0.2
+python main.py --split test4paper/train_dynamic_0.5rt_50scenes --num_scenes 50 --simulate_trj --inject_directional_noise --T60_options 0.5
+python main.py --split test4paper/train_dynamic_0.8rt_50scenes --num_scenes 50 --simulate_trj --inject_directional_noise --T60_options 0.8
