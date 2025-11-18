@@ -122,7 +122,7 @@ def generate_scenes(args):
 
     # Reverberation time (T60) selection from predefined options
     T60 = random.choice(args.T60_options)   # Randomly choose T60 from available options
-
+    
     # Source parameters
     source_min_height = args.source_min_height   # Minimum height of the source
     source_max_height = args.source_max_height   # Maximum height of the source
@@ -180,14 +180,34 @@ def generate_scenes(args):
         mic_array_center = np.mean(mics_pos_agg, axis=0)
 
         # Generate source positions around the microphone array within a defined radial range
-        if endfire_bounce:
+        if hasattr(args, 'single_speaker_30_to_150') and args.single_speaker_30_to_150:
+            # Single speaker moving from 30 to 150 degrees
+            start_angle = 30
+            end_angle = 150
+            angles = np.arange(start_angle, end_angle + DOA_grid_lag, DOA_grid_lag)
+            src_angle = np.radians(angles + np.degrees(rotation_angle))
+
+        elif hasattr(args, 'dual_speaker_opposing') and args.dual_speaker_opposing:
+            # Create opposing arcs for two speakers
+            start_angle = getattr(args, 'dual_speaker_start_angle', 30)
+            end_angle = getattr(args, 'dual_speaker_end_angle', 150)
+
+            # Speaker 1: start_angle -> end_angle using DOA_grid_lag steps
+            angles_spk1 = np.arange(start_angle, end_angle + DOA_grid_lag, DOA_grid_lag)
+            # Speaker 2: end_angle -> start_angle using DOA_grid_lag steps (opposite direction)
+            angles_spk2 = np.arange(end_angle, start_angle - DOA_grid_lag, -DOA_grid_lag)
+
+            # Combine both speaker trajectories
+            src_angle = np.radians(np.concatenate([angles_spk1, angles_spk2]) + np.degrees(rotation_angle))
+
+        elif endfire_bounce:
             n_points = 32
-            
+
             angles_forward = np.arange(start_doa_grid, 90, DOA_grid_lag)
             angles_back = angles_forward[::-1]
             src_angle = np.radians(np.concatenate([angles_forward, angles_back]) + np.degrees(rotation_angle))
-            # np.degrees(src_angle)     
-             
+            # np.degrees(src_angle)
+
         elif offgrid_angle:
             n_points = 32
             src_angle = np.radians(np.arange(start_doa_grid, end_doa_grid, DOA_grid_lag) + [round(random.uniform(0, DOA_grid_lag/2), 2) for _ in range(n_points)] + np.degrees(rotation_angle))  # Calculate angles
