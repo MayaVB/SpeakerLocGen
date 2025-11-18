@@ -38,7 +38,7 @@ def _sample_noise_source_position(scene, args):
     z_max = getattr(args, 'source_max_height', 1.8)
 
     r = np.random.uniform(r_min, r_max)
-    theta = np.random.uniform(0, 2*np.pi)
+    theta = np.random.uniform(np.radians(30), np.radians(150))
     z = np.random.uniform(z_min, z_max)
 
     x = array_center[0] + r * np.cos(theta)
@@ -49,6 +49,20 @@ def _sample_noise_source_position(scene, args):
     x = float(np.clip(x, margin, Lx - margin))
     y = float(np.clip(y, margin, Ly - margin))
     z = float(np.clip(z, margin, Lz - margin))
+    
+    # if scene['src_pos'].shape[1] < 32:
+    # # 25 classes- DOAs 30,150
+    #     DOA_class_selected = random.randint(0, 24)
+    #     x = scene['src_pos'][0,DOA_class_selected]
+    #     y = scene['src_pos'][1,DOA_class_selected]
+    #     z = scene['src_pos'][2,DOA_class_selected]
+    # else:
+    #     # 32 classes- DOAs 10,165
+    #     DOA_class_selected = random.randint(4, 31)
+    #     x = scene['src_pos'][0,DOA_class_selected]
+    #     y = scene['src_pos'][1,DOA_class_selected]
+    #     z = scene['src_pos'][2,DOA_class_selected]
+        
     return np.array([x, y, z], dtype=np.float32)
 
 def _pink_noise(n, rng=np.random):
@@ -317,25 +331,7 @@ def generate_rev_speech(args):
 
             # Generate RIR for the current source position for all mic positons
             if args.simulate_trj:
-                # from gpuRIR import simulateTrajectory
-                # from rir_gen import generate_rirs
-                
-                # RIRs = generate_rirs(scene['room_dim'], scene['src_pos'], index, scene['mic_pos'], scene['RT60'], fs, args.simulate_trj)
-
-                # # rev_signals = simulateTrajectory(s, RIRs)
-                # # rev_signals = rev_signals.T
-                # # scene['DOA_az_trj'] = get_trj_DOA(scene, rev_signals)
-                
-                # # >>> apply speaking envelope post-RIR <<<                
-                # rev_signals = simulateTrajectory(s, RIRs).T  # [M, T]
-                
-                # if args.simulate_quiet_profile:
-                #     env = build_three_phase_envelope(len(s), fs, args.quiet_start_s, args.quiet_duration_s, args.ramp_s, args.quiet_gain)
-                #     rev_signals = rev_signals * env[None, :]  # [M,T] *= [1,T]
-                # scene['DOA_az_trj'] = get_trj_DOA(scene, rev_signals)
-
-            # elif simulate_cpp_trj:
-
+                print(f"simulate_trj argument: {args.simulate_trj}")
                 # Optionally reduce trajectory resolution for performance
                 if args.fast_mode:
                     reduced_fps = min(args.fps, 50)  # Limit to 50 Hz for performance in fast mode
@@ -359,7 +355,7 @@ def generate_rev_speech(args):
                 input_signal_list = list(s.astype(float))
                 rp_path_list = rp_path.tolist()
                 sp_path_list = sp_path.tolist()
-
+                
                 print("Running SignalGenerator...")
                 gen = SignalGenerator()
                 result = gen.generate(
@@ -469,20 +465,20 @@ if __name__ == '__main__':
         description="Simulates and adds reverberation to a clean sound sample."
     )
     # general parameters
-    # parser.add_argument("--split", choices=['train', 'val', 'test'], default='endfire_boreside_cp', help="Generate training, val or test")
-    # parser.add_argument("--split", choices=['train', 'val', 'test'], default='simulate_quiet_profile', help="Generate training, val or test")
-    parser.add_argument("--split", type=str, default="data4test/test_dynamic_0.8rt_30scenes", help="Dataset split or custom folder name")
-    parser.add_argument("--dataset", choices=['None', 'add_noise'], default='add_noise')
+    parser.add_argument("--split", type=str, default="../dataset_folder/gannot-lab/gannot-lab1/SpeakerLocGen/", help="Dataset spl")
     parser.add_argument("--clean_speech_dir", type=str, default='../dataset_folder/gannot-lab/gannot-lab1/datasets/sharon_db/wsj0/Train/', help="Directory where the clean speech files are stored")
-# /private/gannot-lab/gannot-lab1/datasets/sharon_db/wsj0/Train/
+    parser.add_argument("--dataset", choices=['None', 'add_noise'], default='add_noise')
+    
+    # output folder
     parser.add_argument("--output_folder", type=str, default='', help="Directory where the output is saved")
 
     # scene parameters
-    parser.add_argument("--num_scenes", type=int, default=30, help="Number of scenarios to generate")
+    parser.add_argument("--num_scenes", type=int, default=5, help="Number of scenarios to generate")
     parser.add_argument("--mics_num", type=int, default=5, help="Number of microphones in the array")
     parser.add_argument("--mic_min_spacing", type=float, default=0.08, help="Minimum spacing between microphones")
     parser.add_argument("--mic_max_spacing", type=float, default=0.08, help="Maximum spacing between microphones")
     parser.add_argument("--mic_height", type=float, default=1.7, help="Height of the microphone array from the floor")
+    parser.add_argument("--margin", type=float, default=0.5, help="Margin distance between the source/mics to the walls")  
 
     parser.add_argument("--room_len_x_min", type=float, default=4, help="Minimum length of the room in x-direction")
     parser.add_argument("--room_len_x_max", type=float, default=7, help="Maximum length of the room in x-direction")
@@ -492,7 +488,7 @@ if __name__ == '__main__':
     parser.add_argument("--room_len_z_max", type=float, default=2.9, help="Maximum length of the room in z-direction")
 
     # parser.add_argument("--T60_options", type=float, nargs='+', default=[0.3], help="List of T60 values for the room [0.2, 0.4, 0.6, 0.8], [0.3, 0.5, 0.8]")
-    parser.add_argument("--T60_options", type=float, nargs='+', choices=[0.2, 0.5, 0.8], default=[0.3, 0.5, 0.8], help="Choose one or more T60 values from [0.2, 0.3, 0.4, 0.5, 0.6, 0.8]")    
+    parser.add_argument("--T60_options", type=float, nargs='+', choices=[0.2, 0.5, 0.8], default=[0.2], help="Choose one or more T60 values from [0.2, 0.3, 0.4, 0.5, 0.6, 0.8]")    
     parser.add_argument("--snr", type=float, default=20, help="added noise snr value [dB]")
     parser.add_argument("--noise_fc", type=float, default=1000, help="cufoff lowpass freq for added noise [Hz]")
     parser.add_argument("--noise_AR_decay", type=float, default=0.6, help="cufoff lowpass freq for added noise [Hz]")
@@ -506,23 +502,30 @@ if __name__ == '__main__':
     parser.add_argument("--DOA_grid_lag", type=float, default=5, help="Degrees for DOA grid lag")
     
     # Performance optimization flags and trj
-    # parser.add_argument("--simulate_trj", type=bool, default=False, help="simulate moving speaker")
     parser.add_argument("--simulate_trj", action="store_true", help="simulate moving speaker")
-    parser.add_argument("--endfire_bounce", type=bool, default=False, help="simulate 'half circle' movment- endfire -> broadband - back to endfire")    
+    parser.add_argument("--endfire_bounce", type=bool, default=False, help="simulate 'half circle' movment- endfire -> broadband - back to endfire")
     parser.add_argument("--fps", type=float, default=125, help="frames per second: fs/(framesize*(1-overlap))")
     parser.add_argument("--offgrid_angle", type=bool, default=False, help="generate off sampeling grid doas")
     parser.add_argument("--fast_mode", type=bool, default=False, help="Enable performance optimizations (reduced resolution, shorter RIRs, lower reflection order)")
-    
-    # normal_quiet_normal trajectory parameters- note minimum_sentence_len and maximum_sentence_len default 4-6sec 
-    parser.add_argument("--inject_burst_noise", action="store_true", help="add burst noise")
 
-    # normal_quiet_normal trajectory parameters- note minimum_sentence_len and maximum_sentence_len default 4-6sec 
+    # Dual speaker scenario parameters
+    parser.add_argument("--dual_speaker_opposing", type=bool, default=False, help="simulate two speakers moving in opposite directions on the same arc")
+    parser.add_argument("--dual_speaker_start_angle", type=float, default=30, help="starting angle for first speaker (degrees)")
+    parser.add_argument("--dual_speaker_end_angle", type=float, default=150, help="ending angle for first speaker (degrees)")
+    parser.add_argument("--dual_speaker_snr_balance", type=float, default=0.0, help="SNR difference between speakers in dB (positive = speaker 1 louder)")
+    
+    # single_speaker_30_to_150 deg movement
+    parser.add_argument("--single_speaker_30_to_150", type=bool, default=False, help="single_speaker_30_to_150 (default: True)")
+
+    # simulate_quiet_profile
     parser.add_argument("--simulate_quiet_profile", action="store_true", help="add burst noise")
-    # parser.add_argument("--simulate_quiet_profile", type=bool, default=True, help="Activate 3-phase speaking profile (normal → quiet → back to normal)")
     parser.add_argument("--quiet_start_s", type=float, default=1, help="Time (s) when quiet phase begins")
     parser.add_argument("--quiet_duration_s", type=float, default=2.0, help="Length (s) of the quiet phase (middle section)")
     parser.add_argument("--ramp_s", type=float, default=0.8, help="Fade time (s) for smooth transitions in/out")
     parser.add_argument("--quiet_gain", type=float, default=0.02, help="Gain during quiet phase (0-1)")
+
+    # Directional noise bursts (static, RIR-based)
+    parser.add_argument("--inject_burst_noise", type=bool, default=False, help="add burst noise (default: True)")
 
     # Directional noise bursts (static, RIR-based)
     parser.add_argument("--inject_directional_noise", action="store_true", help="Add short directional noise bursts convolved with RIRs")
@@ -532,7 +535,6 @@ if __name__ == '__main__':
     parser.add_argument("--dir_noise_max_ms", type=int, default=500, help="Max burst duration in milliseconds")
     parser.add_argument("--dir_noise_snr_db", type=float, default=0.0, help="Target SNR (dB) of noise vs signal over the burst window; 0 = equal power, negative = louder noise")
 
-    parser.add_argument("--margin", type=float, default=0.5, help="Margin distance between the source/mics to the walls")  
     args = parser.parse_args()
     
     
